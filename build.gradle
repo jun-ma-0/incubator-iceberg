@@ -130,15 +130,18 @@ subprojects {
         }
       }
     }
+
     repositories {
-        maven {
-            name 'Experience platform snapshot artifactory'
-            url 'https://artifactory.corp.adobe.com/artifactory/maven-experienceplatform-snapshot/'
-            credentials {
-                username = "${artifactory_user_p}" == "" ? System.getenv("ARTIFACTORY_USER") : "${artifactory_user_p}"
-                password = "${artifactory_key_p}" == "" ? System.getenv("ARTIFACTORY_API_TOKEN") : "${artifactory_key_p}"
-            }
+      maven {
+        name 'Experience Platform Repositories'
+        def releasesRepoUrl  = "https://artifactory.corp.adobe.com/artifactory/maven-experienceplatform-release/"
+        def snapshotsRepoUrl = "https://artifactory.corp.adobe.com/artifactory/maven-experienceplatform-snapshot/"
+        url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+        credentials {
+            username = "${artifactory_user_p}" == "" ? System.getenv("ARTIFACTORY_USER") : "${artifactory_user_p}"
+            password = "${artifactory_key_p}" == "" ? System.getenv("ARTIFACTORY_API_TOKEN") : "${artifactory_key_p}"
         }
+      }
     }
   }
 }

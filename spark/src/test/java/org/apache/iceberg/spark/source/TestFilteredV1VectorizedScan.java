@@ -49,6 +49,7 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.api.java.UDF1;
+import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow;
 import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.EqualTo;
@@ -415,6 +416,40 @@ public class TestFilteredV1VectorizedScan {
           "ts > cast('2017-12-22 06:00:00+00:00' as timestamp) and " +
               "ts < cast('2017-12-22 08:00:00+00:00' as timestamp)",
           "id"));
+    }
+  }
+
+  @Test
+  public void testFallBackToNonVectorizedReader() {
+    DataSourceOptions options = new DataSourceOptions(ImmutableMap.of(
+        "path", unpartitioned.toString(),
+        IcebergSource.ICEBERG_READ_ENABLE_V1_VECTORIZATION_CONF, "true")
+    );
+
+    // set spark.sql.codegen.maxFields to 2
+    String maxFieldsBeforeTest = TestFilteredV1VectorizedScan.spark.conf().get("spark.sql.codegen.maxFields");
+    TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", "2");
+
+    try {
+      IcebergSource source = new IcebergSource();
+
+      for (int i = 0; i < 10; i += 1) {
+        SupportsScanColumnarBatch reader = (SupportsScanColumnarBatch) source.createReader(options);
+
+        pushFilters(reader, EqualTo.apply("id", i));
+
+        Assert.assertFalse(reader.enableBatchRead());
+
+        List<InputPartition<InternalRow>> tasks = reader.planInputPartitions();
+        Assert.assertEquals("Should only create one task for a small file", 1, tasks.size());
+
+        // validate row filtering
+        assertEqualsSafe(SCHEMA.asStruct(), expected(i),
+            read(unpartitioned.toString(), "id = " + i));
+      }
+    } finally {
+      // return global conf to previous state
+      TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", maxFieldsBeforeTest);
     }
   }
 

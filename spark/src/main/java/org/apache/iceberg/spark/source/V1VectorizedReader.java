@@ -39,6 +39,8 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.spark.SparkFilters;
 import org.apache.iceberg.spark.SparkSchemaUtil;
+import org.apache.iceberg.types.Type;
+import org.apache.iceberg.types.Types;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.execution.datasources.PartitionedFile;
@@ -76,7 +78,6 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private final Long splitSize;
   private final Integer splitLookback;
   private final Long splitOpenFileCost;
-  private final Integer maxNumVectorizedFields;
   private final FileIO fileIo;
   private final EncryptionManager encryptionManager;
   private final boolean caseSensitive;
@@ -85,7 +86,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private final SparkSession sparkSession;
   // default as per SQLConf.PARQUET_VECTORIZED_READER_BATCH_SIZE default
   public static final int DEFAULT_NUM_ROWS_IN_BATCH = 4096;
-  public static final int DEFAULT_MAX_NUM_FIELDS = 300;
+  private DataSourceOptions options;
 
   private StructType requestedSchema = null;
   private List<Expression> filterExpressions = null;
@@ -113,8 +114,6 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     this.splitSize = options.get("split-size").map(Long::parseLong).orElse(null);
     this.splitLookback = options.get("lookback").map(Integer::parseInt).orElse(null);
     this.splitOpenFileCost = options.get("file-open-cost").map(Long::parseLong).orElse(null);
-    this.maxNumVectorizedFields =
-        options.get("max-num-vectorized-fields").map(Integer::parseInt).orElse(DEFAULT_MAX_NUM_FIELDS);
 
     this.schema = table.schema();
     this.fileIo = table.io();
@@ -122,6 +121,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     this.caseSensitive = caseSensitive;
     this.hadoopConf = hadoopConf;
     this.sparkSession = sparkSession;
+    this.options = options;
 
     LOG.debug("=> Set Config numRecordsPerBatch: {}, " +
             "Split size: {}, " +
@@ -130,7 +130,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
         numRecordsPerBatch,
         splitSize,
         System.getProperty(SystemProperties.WORKER_THREAD_POOL_SIZE_PROP),
-        maxNumVectorizedFields);
+        Integer.valueOf(sparkSession.conf().get("spark.sql.codegen.maxFields", "100")));
   }
 
   private Schema lazySchema() {
@@ -181,12 +181,12 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     hadoopConf.set(SQLConf.PARQUET_VECTORIZED_READER_BATCH_SIZE().key(),
         Integer.toString(this.numRecordsPerBatch));
     hadoopConf.set(SQLConf.WHOLESTAGE_MAX_NUM_FIELDS().key(),
-        Integer.toString(maxNumVectorizedFields));
+        sparkSession.conf().get("spark.sql.codegen.maxFields", "100"));
     sparkSession.sessionState().conf().setConfString(SQLConf.PARQUET_VECTORIZED_READER_ENABLED().key(), "true");
     sparkSession.sessionState().conf().setConfString(SQLConf.PARQUET_VECTORIZED_READER_BATCH_SIZE().key(),
         Integer.toString(this.numRecordsPerBatch));
     sparkSession.sessionState().conf().setConfString(SQLConf.WHOLESTAGE_MAX_NUM_FIELDS().key(),
-        Integer.toString(maxNumVectorizedFields));
+        sparkSession.conf().get("spark.sql.codegen.maxFields", "100"));
 
     // prepare sparkReadSchema
     StructType sparkReadSchema = SparkSchemaUtil.convert(lazySchema());
@@ -212,6 +212,17 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     LOG.debug("=> Spark Schema: {}", sparkReadSchema);
 
     return readTasks;
+  }
+
+  @Override
+  public List<InputPartition<InternalRow>> planInputPartitions() {
+    // if we are here, it means we cannot do vectorized reads
+    // so just use the regular Reader.
+    Reader reader = new Reader(table, caseSensitive, options);
+    reader.pushFilters(pushedFilters);
+    reader.pruneColumns(requestedSchema);
+
+    return reader.planInputPartitions();
   }
 
   @Override
@@ -254,6 +265,28 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     // invalidate the schema that will be projected
     this.schema = null;
     this.type = null;
+  }
+
+  @Override
+  public boolean enableBatchRead() {
+    int maxFields = Integer.valueOf(sparkSession.conf().get("spark.sql.codegen.maxFields", "100"));
+    return numOfNestedFields(lazySchema().asStruct()) <= maxFields;
+  }
+
+  // based out of org.apache.spark.sql.execution.WholeStageCodegenExec#numOfNestedFields
+  private int numOfNestedFields(Type dataType) {
+    if (dataType instanceof Types.StructType) {
+      Types.StructType st = (Types.StructType) dataType;
+      return st.fields().stream().map(f -> numOfNestedFields(f.type())).reduce(0, Integer::sum);
+    } else if (dataType instanceof Types.MapType) {
+      Types.MapType mt = (Types.MapType) dataType;
+      return numOfNestedFields(mt.keyType()) + numOfNestedFields(mt.valueType());
+    } else if (dataType instanceof Types.ListType) {
+      Types.ListType lt = (Types.ListType) dataType;
+      return numOfNestedFields(lt.elementType());
+    } else {
+      return 1;
+    }
   }
 
   @Override

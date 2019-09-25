@@ -19,8 +19,9 @@
 
 package org.apache.iceberg.parquet;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
+import java.nio.ByteBuffer;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.function.Function;
 import org.apache.iceberg.Schema;
@@ -30,12 +31,14 @@ import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.ExpressionVisitors;
 import org.apache.iceberg.expressions.ExpressionVisitors.BoundExpressionVisitor;
 import org.apache.iceberg.expressions.Literal;
+import org.apache.iceberg.types.Comparators;
 import org.apache.iceberg.types.Type;
-import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.StructType;
+import org.apache.iceberg.util.BinaryUtil;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -102,7 +105,7 @@ public class ParquetMetricsRowGroupFilter {
         }
       }
 
-      return ExpressionVisitors.visit(expr, this);
+      return ExpressionVisitors.visitEvaluator(expr, this);
     }
 
     @Override
@@ -336,6 +339,47 @@ public class ParquetMetricsRowGroupFilter {
 
     @Override
     public <T> Boolean notIn(BoundReference<T> ref, Literal<T> lit) {
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T> Boolean startsWith(BoundReference<T> ref, Literal<T> lit) {
+      int id = ref.fieldId();
+
+      Long valueCount = valueCounts.get(id);
+      if (valueCount == null) {
+        // the column is not present and is all nulls
+        return ROWS_CANNOT_MATCH;
+      }
+
+      Statistics<Binary> colStats = (Statistics<Binary>) stats.get(id);
+      if (colStats != null && !colStats.isEmpty()) {
+        if (!colStats.hasNonNullValue()) {
+          return ROWS_CANNOT_MATCH;
+        }
+
+        ByteBuffer prefixAsBytes = lit.toByteBuffer();
+
+        Comparator<ByteBuffer> comparator = Comparators.unsignedBytes();
+
+        Binary lower = colStats.genericGetMin();
+        // truncate lower bound so that its length in bytes is not greater than the length of prefix
+        int lowerLength = Math.min(prefixAsBytes.remaining(), lower.length());
+        int lowerCmp = comparator.compare(BinaryUtil.truncateBinary(lower.toByteBuffer(), lowerLength), prefixAsBytes);
+        if (lowerCmp > 0) {
+          return ROWS_CANNOT_MATCH;
+        }
+
+        Binary upper = colStats.genericGetMax();
+        // truncate upper bound so that its length in bytes is not greater than the length of prefix
+        int upperLength = Math.min(prefixAsBytes.remaining(), upper.length());
+        int upperCmp = comparator.compare(BinaryUtil.truncateBinary(upper.toByteBuffer(), upperLength), prefixAsBytes);
+        if (upperCmp < 0) {
+          return ROWS_CANNOT_MATCH;
+        }
+      }
+
       return ROWS_MIGHT_MATCH;
     }
 

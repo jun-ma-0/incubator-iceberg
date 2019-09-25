@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import groovy.transform.Memoized
+
 buildscript {
   repositories {
     jcenter()
@@ -48,7 +50,7 @@ allprojects {
   group = "org.apache.iceberg"
   apply plugin: 'com.palantir.baseline-idea'
   /* TODO - this assumes that the upstream apache version is 1.0 so we need to be consistent w/ upstream changes */
-  version = "1.0-adobe-6.0"
+  version = "1.0-adobe-7.0"
   repositories {
     maven { url  "http://palantir.bintray.com/releases" }
     mavenCentral()
@@ -147,24 +149,23 @@ subprojects {
 }
 
 task aggregateJavadoc(type: Javadoc) {
-  // use the branch name in place of version in Javadoc
-  project.rootProject.version = versionDetails().branchName
+  project.rootProject.version = getJavadocVersion()
 
   dependsOn subprojects.javadoc
   source subprojects.javadoc.source
-  destinationDir project.rootProject.file("site/docs/javadoc/${versionDetails().branchName}")
+  destinationDir project.rootProject.file("site/docs/javadoc/${getJavadocVersion()}")
   classpath = project.rootProject.files(subprojects.javadoc.classpath)
 }
 
 task removeJavadoc(type: Exec) {
-  commandLine 'rm', '-rf', "site/docs/javadoc/${versionDetails().branchName}"
+  commandLine 'rm', '-rf', "site/docs/javadoc/${getJavadocVersion()}"
 }
 
 task refreshJavadoc(type: Exec) {
   dependsOn aggregateJavadoc
   dependsOn removeJavadoc
   aggregateJavadoc.mustRunAfter removeJavadoc
-  commandLine 'git', 'add', "site/docs/javadoc/${versionDetails().branchName}"
+  commandLine 'git', 'add', "site/docs/javadoc/${getJavadocVersion()}"
 }
 
 task deploySite(type: Exec) {
@@ -267,6 +268,8 @@ project(':iceberg-core') {
       exclude group: 'org.apache.avro', module: 'avro'
       exclude group: 'org.slf4j', module: 'slf4j-log4j12'
     }
+
+    testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
   }
 }
 
@@ -280,6 +283,8 @@ project(':iceberg-data') {
       exclude group: 'org.apache.avro', module: 'avro'
       exclude group: 'org.slf4j', module: 'slf4j-log4j12'
     }
+
+    testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
   }
 
   test {
@@ -320,6 +325,8 @@ project(':iceberg-hive') {
       exclude group: 'org.apache.avro', module: 'avro'
       exclude group: 'org.slf4j', module: 'slf4j-log4j12'
     }
+
+    testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
   }
 }
 
@@ -386,6 +393,7 @@ project(':iceberg-spark') {
       exclude group: 'org.apache.avro', module: 'avro'
     }
     testCompile project(path: ':iceberg-hive', configuration: 'testArtifacts')
+    testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
   }
 }
 
@@ -467,3 +475,37 @@ project(':iceberg-spark-runtime') {
   }
 }
 
+@Memoized
+boolean isVersionFileExists() {
+  return file('version.txt').exists()
+}
+
+@Memoized
+String getVersionFromFile() {
+  return file('version.txt').text.trim()
+}
+
+String getProjectVersion() {
+  if (isVersionFileExists()) {
+    return getVersionFromFile()
+  }
+
+  try {
+    return gitVersion()
+  } catch (NullPointerException e) {
+    throw new Exception("Neither version.txt nor git version exists")
+  }
+}
+
+String getJavadocVersion() {
+  if (isVersionFileExists()) {
+    return getVersionFromFile()
+  }
+
+  try {
+    // use the branch name in place of version in Javadoc
+    return versionDetails().branchName
+  } catch (NullPointerException e) {
+    throw new Exception("Neither version.txt nor git version exists")
+  }
+}

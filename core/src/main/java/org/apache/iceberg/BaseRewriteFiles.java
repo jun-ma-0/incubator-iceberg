@@ -22,8 +22,8 @@ package org.apache.iceberg;
 import com.google.common.base.Preconditions;
 import java.util.Set;
 
-class ReplaceFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
-  ReplaceFiles(TableOperations ops) {
+class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
+  BaseRewriteFiles(TableOperations ops) {
     super(ops);
 
     // replace files must fail if any of the deleted paths is missing and cannot be deleted
@@ -48,7 +48,7 @@ class ReplaceFiles extends MergingSnapshotProducer<RewriteFiles> implements Rewr
         "Files to add can not be null or empty");
 
     for (DataFile toDelete : filesToDelete) {
-      delete(toDelete.path());
+      delete(toDelete);
     }
 
     for (DataFile toAdd : filesToAdd) {

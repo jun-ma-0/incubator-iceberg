@@ -60,8 +60,13 @@ import org.apache.spark.sql.sources.v2.DataSourceOptions;
 import org.apache.spark.sql.sources.v2.reader.DataSourceReader;
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.SupportsPushDownFilters;
+import org.apache.spark.sql.sources.v2.reader.SupportsPushDownRequiredColumns;
 import org.apache.spark.sql.sources.v2.reader.SupportsScanColumnarBatch;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.IntegerType$;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -87,7 +92,13 @@ public class TestFilteredV1VectorizedScan {
   private static final Schema SCHEMA = new Schema(
       Types.NestedField.required(1, "id", Types.LongType.get()),
       Types.NestedField.optional(2, "ts", Types.TimestampType.withZone()),
-      Types.NestedField.optional(3, "data", Types.StringType.get())
+      Types.NestedField.optional(3, "data", Types.StringType.get()),
+      Types.NestedField.optional(4, "coordinates",
+          Types.StructType.of(
+              Types.NestedField.required(5, "lat", Types.DoubleType.get()),
+              Types.NestedField.required(6, "lon", Types.DoubleType.get())
+          )
+      )
   );
 
   private static final PartitionSpec BUCKET_BY_ID = PartitionSpec.builderFor(SCHEMA)
@@ -138,8 +149,7 @@ public class TestFilteredV1VectorizedScan {
   @Parameterized.Parameters
   public static Object[][] parameters() {
     return new Object[][] {
-        new Object[] { "parquet" },
-        new Object[] { "avro" }
+        new Object[] { "parquet" }
     };
   }
 
@@ -420,7 +430,51 @@ public class TestFilteredV1VectorizedScan {
   }
 
   @Test
-  public void testFallBackToNonVectorizedReader() {
+  public void testVectorizedReaderOnVanillaSpark() {
+    DataSourceOptions options = new DataSourceOptions(ImmutableMap.of(
+        "path", unpartitioned.toString(),
+        IcebergSource.ICEBERG_READ_ENABLE_V1_VECTORIZATION_CONF, "true")
+    );
+
+    // set spark.sql.codegen.maxFields to 2
+    String maxFieldsBeforeTest = TestFilteredV1VectorizedScan.spark.conf().get("spark.sql.codegen.maxFields");
+    TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", "100");
+
+    try {
+      IcebergSource source = new IcebergSource();
+
+      for (int i = 0; i < 10; i += 1) {
+        DataSourceReader reader = source.createReader(options);
+
+        // select only primitive types
+        StructType readSchema = new StructType(
+            new StructField[] {
+                new StructField("id", DataTypes.LongType, false, Metadata.empty()),
+                new StructField("ts", DataTypes.TimestampType, true, Metadata.empty()),
+                new StructField("data", DataTypes.StringType, true, Metadata.empty())
+            }
+        );
+        ((SupportsPushDownRequiredColumns) reader).pruneColumns(readSchema);
+
+        pushFilters(reader, EqualTo.apply("id", i));
+
+        Assert.assertTrue(((SupportsScanColumnarBatch) reader).enableBatchRead());
+
+        List<InputPartition<ColumnarBatch>> tasks = ((SupportsScanColumnarBatch) reader).planBatchInputPartitions();
+        Assert.assertEquals("Should only create one task for a small file", 1, tasks.size());
+
+        // validate row filtering
+        assertEqualsSafe(SCHEMA.asStruct(), expected(i),
+            read(unpartitioned.toString(), "id = " + i));
+      }
+    } finally {
+      // return global conf to previous state
+      TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", maxFieldsBeforeTest);
+    }
+  }
+
+  @Test
+  public void testFallBackToNonVectorizedReaderWithMaxFields() {
     DataSourceOptions options = new DataSourceOptions(ImmutableMap.of(
         "path", unpartitioned.toString(),
         IcebergSource.ICEBERG_READ_ENABLE_V1_VECTORIZATION_CONF, "true")
@@ -429,6 +483,40 @@ public class TestFilteredV1VectorizedScan {
     // set spark.sql.codegen.maxFields to 2
     String maxFieldsBeforeTest = TestFilteredV1VectorizedScan.spark.conf().get("spark.sql.codegen.maxFields");
     TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", "2");
+
+    try {
+      IcebergSource source = new IcebergSource();
+
+      for (int i = 0; i < 10; i += 1) {
+        SupportsScanColumnarBatch reader = (SupportsScanColumnarBatch) source.createReader(options);
+
+        pushFilters(reader, EqualTo.apply("id", i));
+
+        Assert.assertFalse(reader.enableBatchRead());
+
+        List<InputPartition<InternalRow>> tasks = reader.planInputPartitions();
+        Assert.assertEquals("Should only create one task for a small file", 1, tasks.size());
+
+        // validate row filtering
+        assertEqualsSafe(SCHEMA.asStruct(), expected(i),
+            read(unpartitioned.toString(), "id = " + i));
+      }
+    } finally {
+      // return global conf to previous state
+      TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", maxFieldsBeforeTest);
+    }
+  }
+
+  @Test
+  public void testFallBackToNonVectorizedReaderWhenNonPrimitiveFields() {
+    DataSourceOptions options = new DataSourceOptions(ImmutableMap.of(
+        "path", unpartitioned.toString(),
+        IcebergSource.ICEBERG_READ_ENABLE_V1_VECTORIZATION_CONF, "true")
+    );
+
+    // set spark.sql.codegen.maxFields to 2
+    String maxFieldsBeforeTest = TestFilteredV1VectorizedScan.spark.conf().get("spark.sql.codegen.maxFields");
+    TestFilteredV1VectorizedScan.spark.conf().set("spark.sql.codegen.maxFields", "100");
 
     try {
       IcebergSource source = new IcebergSource();

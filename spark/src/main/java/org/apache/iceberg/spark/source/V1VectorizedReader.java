@@ -269,8 +269,18 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
 
   @Override
   public boolean enableBatchRead() {
+    boolean isRunningOnDatabricks =
+        sparkSession.conf().get("spark.databricks.clusterUsageTags.clusterId", null) != null;
     int maxFields = Integer.valueOf(sparkSession.conf().get("spark.sql.codegen.maxFields", "100"));
-    return numOfNestedFields(lazySchema().asStruct()) <= maxFields;
+
+    if (isRunningOnDatabricks) {
+      // databricks runtime can do vectorized reads on complex types
+      return numOfNestedFields(lazySchema().asStruct()) <= maxFields;
+    } else {
+      // any other runtime, including vanilla Spark, can only do vectorized reads on primitive types
+      boolean areAllColumnsPrimitive = lazySchema().columns().stream().allMatch(c -> c.type().isPrimitiveType());
+      return areAllColumnsPrimitive && numOfNestedFields(lazySchema().asStruct()) <= maxFields;
+    }
   }
 
   // based out of org.apache.spark.sql.execution.WholeStageCodegenExec#numOfNestedFields

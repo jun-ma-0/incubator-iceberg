@@ -28,6 +28,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -107,7 +108,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   private final EncryptionManager encryptionManager;
   private final boolean caseSensitive;
   private StructType requestedSchema = null;
-  private List<Expression> filterExpressions = null;
+  private List<Expression> filterExpressions = new ArrayList<>();
   private Filter[] pushedFilters = NO_FILTERS;
 
   // lazy variables
@@ -136,8 +137,8 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   }
 
   private Schema lazySchema() {
-    if (schema == null) {
-      if (requestedSchema != null) {
+    if (schema == null || schema.asStruct().fields().isEmpty()) {
+      if (requestedSchema != null && requestedSchema.fields().length > 0) {
         this.schema = SparkSchemaUtil.prune(table.schema(), requestedSchema);
       } else {
         this.schema = table.schema();
@@ -187,7 +188,8 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
       }
     }
 
-    this.filterExpressions = expressions;
+    // PLAT-41559 - tombstone filters need to overload the filter expressions
+    this.filterExpressions.addAll(expressions);
     this.pushedFilters = pushed.toArray(new Filter[0]);
 
     // invalidate the schema that will be projected
@@ -197,6 +199,11 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     // Spark doesn't support residuals per task, so return all filters
     // to get Spark to handle record-level filtering
     return filters;
+  }
+
+  // PLAT-41559 - added this to be able to overload the expressions used by Iceberg to build filters, i.e. tombstone
+  void addFilters(List<Expression> expressions) {
+    filterExpressions.addAll(expressions);
   }
 
   @Override

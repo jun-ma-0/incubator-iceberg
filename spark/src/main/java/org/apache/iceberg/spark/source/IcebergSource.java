@@ -84,15 +84,15 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     Optional<String> enableV1VectorizedReadOpt = options.get(ICEBERG_READ_ENABLE_V1_VECTORIZATION_CONF);
     Optional<String> numRecordsPerBatchOpt = options.get(ICEBERG_READ_NUM_RECORDS_BATCH_CONF);
 
-    boolean enableV1VectorizedRead = enableV1VectorizedReadOpt.isPresent() ?
-        Boolean.parseBoolean(enableV1VectorizedReadOpt.get()) : false;
+    boolean enableV1VectorizedRead =
+        enableV1VectorizedReadOpt.isPresent() && Boolean.parseBoolean(enableV1VectorizedReadOpt.get());
 
     int numRecordsPerBatch = numRecordsPerBatchOpt.isPresent() ?
         Integer.parseInt(numRecordsPerBatchOpt.get()) : V1VectorizedReader.DEFAULT_NUM_ROWS_IN_BATCH;
     if (enableV1VectorizedRead) {
       LOG.debug("V1VectorizedReader engaged.");
-      V1VectorizedReader reader = new V1VectorizedReader(table, Boolean.valueOf(caseSensitive), options, conf,
-          numRecordsPerBatch, lazySparkSession());
+      V1VectorizedReader reader = (V1VectorizedReader) vectorizedReader(table, Boolean.valueOf(caseSensitive), options,
+          conf, numRecordsPerBatch, lazySparkSession());
       if (readSchema != null) {
         // convert() will fail if readSchema contains fields not in table.schema()
         SparkSchemaUtil.convert(table.schema(), readSchema);
@@ -101,7 +101,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
       return reader;
     } else {
       LOG.debug("Non-VectorizedReader engaged.");
-      Reader reader = new Reader(table, Boolean.valueOf(caseSensitive), options);
+      Reader reader = (Reader) reader(table, Boolean.valueOf(caseSensitive), options);
       if (readSchema != null) {
         // convert() will fail if readSchema contains fields not in table.schema()
         SparkSchemaUtil.convert(table.schema(), readSchema);
@@ -109,6 +109,19 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
       }
       return reader;
     }
+  }
+
+  // PLAT-41559 - override from {@link com.adobe.platform.iceberg.extensions.ExtendedIcebergSource}
+  protected DataSourceReader reader(Table table, boolean caseSensitive, DataSourceOptions options) {
+    return new Reader(table, Boolean.valueOf(caseSensitive), options);
+  }
+
+  // PLAT-41559 - override from {@link com.adobe.platform.iceberg.extensions.ExtendedIcebergSource}
+  protected DataSourceReader vectorizedReader(
+      Table table, boolean caseSensitive, DataSourceOptions options,
+      Configuration hadoopConf, int numRecordsPerBatch, SparkSession sparkSession) {
+    LOG.debug("V1VectorizedReader engaged.");
+    return new V1VectorizedReader(table, caseSensitive, options, hadoopConf, numRecordsPerBatch, sparkSession);
   }
 
   @Override
@@ -158,14 +171,14 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     }
   }
 
-  private SparkSession lazySparkSession() {
+  protected SparkSession lazySparkSession() {
     if (lazySpark == null) {
       this.lazySpark = SparkSession.builder().getOrCreate();
     }
     return lazySpark;
   }
 
-  private Configuration lazyBaseConf() {
+  protected Configuration lazyBaseConf() {
     if (lazyConf == null) {
       this.lazyConf = lazySparkSession().sessionState().newHadoopConf();
     }
@@ -184,14 +197,15 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     return table;
   }
 
-  private static void mergeIcebergHadoopConfs(
+  // PLAT-41559 - available for accessing from {@link com.adobe.platform.iceberg.extensions.ExtendedIcebergSource}
+  protected static void mergeIcebergHadoopConfs(
       Configuration baseConf, Map<String, String> options) {
     options.keySet().stream()
         .filter(key -> key.startsWith("hadoop."))
         .forEach(key -> baseConf.set(key.replaceFirst("hadoop.", ""), options.get(key)));
   }
 
-  private void validateWriteSchema(Schema tableSchema, Schema dsSchema, Boolean checkNullability) {
+  protected void validateWriteSchema(Schema tableSchema, Schema dsSchema, Boolean checkNullability) {
     List<String> errors;
     if (checkNullability) {
       errors = CheckCompatibility.writeCompatibilityErrors(tableSchema, dsSchema);
@@ -210,7 +224,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     }
   }
 
-  private void validatePartitionTransforms(PartitionSpec spec) {
+  protected void validatePartitionTransforms(PartitionSpec spec) {
     if (spec.fields().stream().anyMatch(field -> field.transform() instanceof UnknownTransform)) {
       String unsupported = spec.fields().stream()
           .map(PartitionField::transform)
@@ -223,7 +237,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     }
   }
 
-  private boolean checkNullability(DataSourceOptions options) {
+  protected boolean checkNullability(DataSourceOptions options) {
     boolean sparkCheckNullability = Boolean.parseBoolean(lazySpark.conf()
         .get("spark.sql.iceberg.check-nullability", "true"));
     boolean dataFrameCheckNullability = options.getBoolean("check-nullability", true);

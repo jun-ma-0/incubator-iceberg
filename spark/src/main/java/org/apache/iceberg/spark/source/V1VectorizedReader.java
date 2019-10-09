@@ -101,7 +101,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private DataSourceOptions options;
 
   private StructType requestedSchema = null;
-  private List<Expression> filterExpressions = null;
+  private List<Expression> filterExpressions = new ArrayList<>();
   private Filter[] pushedFilters = NO_FILTERS;
 
   // lazy variables
@@ -261,7 +261,8 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       }
     }
 
-    this.filterExpressions = expressions;
+    // PLAT-41559 - tombstone filters need to overload the filter expressions
+    this.filterExpressions.addAll(expressions);
     this.pushedFilters = pushed.toArray(new Filter[0]);
 
     // invalidate the schema that will be projected
@@ -271,6 +272,11 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     // Spark doesn't support residuals per task, so return all filters
     // to get Spark to handle record-level filtering
     return filters;
+  }
+
+  // PLAT-41559 - added this to be able to overload the expressions used by Iceberg to build filters, i.e. tombstone
+  void addFilters(List<Expression> expressions) {
+    filterExpressions.addAll(expressions);
   }
 
   @Override

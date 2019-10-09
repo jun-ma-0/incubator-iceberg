@@ -66,6 +66,10 @@ abstract class BaseTableScan implements TableScan {
     this(ops, table, null, schema, Expressions.alwaysTrue(), true, false, null, ImmutableMap.of());
   }
 
+  protected BaseTableScan(TableOperations ops, Table table, Schema schema, Expression rowFilter) {
+    this(ops, table, null, schema, rowFilter, true, false, null, ImmutableMap.of());
+  }
+
   protected BaseTableScan(TableOperations ops, Table table, Long snapshotId, Schema schema,
                         Expression rowFilter, boolean caseSensitive, boolean colStats,
                         Collection<String> selectedColumns, ImmutableMap<String, String> options) {

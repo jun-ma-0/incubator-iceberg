@@ -28,6 +28,7 @@ include 'spark'
 include 'spark-runtime'
 include 'pig'
 include 'hive'
+include 'tombstone'
 
 project(':api').name = 'iceberg-api'
 project(':common').name = 'iceberg-common'
@@ -39,4 +40,5 @@ project(':spark').name = 'iceberg-spark'
 project(':spark-runtime').name = 'iceberg-spark-runtime'
 project(':pig').name = 'iceberg-pig'
 project(':hive').name = 'iceberg-hive'
+project(':tombstone').name = 'iceberg-tombstone'
 

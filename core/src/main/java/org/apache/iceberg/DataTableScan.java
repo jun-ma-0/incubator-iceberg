@@ -52,6 +52,10 @@ public class DataTableScan extends BaseTableScan {
     super(ops, table, table.schema());
   }
 
+  public DataTableScan(TableOperations ops, Table table, Expression rowFilter) {
+    super(ops, table, table.schema(), rowFilter);
+  }
+
   protected DataTableScan(TableOperations ops, Table table, Long snapshotId, Schema schema,
                           Expression rowFilter, boolean caseSensitive, boolean colStats,
                           Collection<String> selectedColumns, ImmutableMap<String, String> options) {

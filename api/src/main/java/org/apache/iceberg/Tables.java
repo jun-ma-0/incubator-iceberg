@@ -36,6 +36,9 @@ public interface Tables {
   default Table create(Schema schema, PartitionSpec spec, String tableIdentifier) {
     return create(schema, spec, ImmutableMap.of(), tableIdentifier);
   }
+  default Table create(Schema schema, PartitionSpec spec, String tableIdentifier, Map<String, String> options) {
+    return create(schema, spec, options, tableIdentifier);
+  }
 
   Table create(Schema schema,
                PartitionSpec spec,

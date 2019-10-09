@@ -227,6 +227,9 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       this.filterUpdated = false;
     }
 
+    Boolean skipInclusiveEvaluation =
+        Boolean.valueOf(base.properties().getOrDefault("extension.skip.inclusive.evaluation", "false"));
+
     Snapshot current = base.currentSnapshot();
     Map<Integer, List<ManifestFile>> groups = Maps.newTreeMap(Comparator.<Integer>reverseOrder());
 
@@ -252,7 +255,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       List<ManifestFile> filtered;
       if (current != null) {
         List<ManifestFile> manifests = current.manifests();
-        filtered = Arrays.asList(filterManifests(metricsEvaluator, manifests));
+        filtered = Arrays.asList(filterManifests(metricsEvaluator, manifests, skipInclusiveEvaluation));
       } else {
         filtered = ImmutableList.of();
       }
@@ -287,7 +290,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     }
   }
 
-  private ManifestFile[] filterManifests(StrictMetricsEvaluator metricsEvaluator, List<ManifestFile> manifests)
+  private ManifestFile[] filterManifests(StrictMetricsEvaluator metricsEvaluator, List<ManifestFile> manifests, Boolean skipInclusiveEvaluation)
       throws IOException {
     ManifestFile[] filtered = new ManifestFile[manifests.size()];
     // open all of the manifest files in parallel, use index to avoid reordering
@@ -295,7 +298,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
         .stopOnFailure().throwFailureWhenFinished()
         .executeWith(ThreadPools.getWorkerPool())
         .run(index -> {
-          ManifestFile manifest = filterManifest(metricsEvaluator, manifests.get(index));
+          ManifestFile manifest = filterManifest(metricsEvaluator, manifests.get(index), skipInclusiveEvaluation);
           filtered[index] = manifest;
         }, IOException.class);
     return filtered;
@@ -428,7 +431,8 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
    * @return a ManifestReader that is a filtered version of the input manifest.
    */
   private ManifestFile filterManifest(StrictMetricsEvaluator metricsEvaluator,
-                                      ManifestFile manifest) throws IOException {
+                                      ManifestFile manifest, Boolean skipInclusiveEvaluation)
+      throws IOException {
     ManifestFile cached = filteredManifests.get(manifest);
     if (cached != null) {
       return cached;
@@ -453,7 +457,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       // manifest without copying data. if a manifest does have a file to remove, this will break
       // out of the loop and move on to filtering the manifest.
       boolean hasDeletedFiles =
-          manifestHasDeletedFiles(metricsEvaluator, reader, pathWrapper, partitionWrapper);
+          manifestHasDeletedFiles(metricsEvaluator, reader, pathWrapper, partitionWrapper, skipInclusiveEvaluation);
 
       if (!hasDeletedFiles) {
         filteredManifests.put(manifest, manifest);
@@ -461,13 +465,13 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       }
 
       return filterManifestWithDeletedFiles(metricsEvaluator, manifest, reader, pathWrapper,
-          partitionWrapper);
+          partitionWrapper, skipInclusiveEvaluation);
     }
   }
 
   private boolean manifestHasDeletedFiles(
       StrictMetricsEvaluator metricsEvaluator, ManifestReader reader,
-      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper) {
+      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation) {
     Evaluator inclusive = extractInclusiveDeleteExpression(reader);
     Evaluator strict = extractStrictDeleteExpression(reader);
     boolean hasDeletedFiles = false;
@@ -476,10 +480,12 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       boolean fileDelete = deletePaths.contains(pathWrapper.set(file.path())) ||
           dropPartitions.contains(partitionWrapper.set(file.partition()));
       if (fileDelete || inclusive.eval(file.partition())) {
-        ValidationException.check(
-            fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
-            "Cannot delete file where some, but not all, rows match filter %s: %s",
-            this.deleteExpression, file.path());
+        if(!skipInclusiveEvaluation) {
+          ValidationException.check(
+              fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
+              "Cannot delete file where some, but not all, rows match filter %s: %s",
+              this.deleteExpression, file.path());
+        }
 
         hasDeletedFiles = true;
         if (failAnyDelete) {
@@ -493,7 +499,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
 
   private ManifestFile filterManifestWithDeletedFiles(
       StrictMetricsEvaluator metricsEvaluator, ManifestFile manifest, ManifestReader reader,
-      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper) throws IOException {
+      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation) throws IOException {
     Evaluator inclusive = extractInclusiveDeleteExpression(reader);
     Evaluator strict = extractStrictDeleteExpression(reader);
     // when this point is reached, there is at least one file that will be deleted in the
@@ -509,10 +515,12 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
             dropPartitions.contains(partitionWrapper.set(file.partition()));
         if (entry.status() != Status.DELETED) {
           if (fileDelete || inclusive.eval(file.partition())) {
-            ValidationException.check(
-                fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
-                "Cannot delete file where some, but not all, rows match filter %s: %s",
-                this.deleteExpression, file.path());
+            if(!skipInclusiveEvaluation) {
+              ValidationException.check(
+                  fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
+                  "Cannot delete file where some, but not all, rows match filter %s: %s",
+                  this.deleteExpression, file.path());
+            }
 
             writer.delete(entry);
 

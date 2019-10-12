@@ -1,3 +1,20 @@
+<!--
+ - Licensed to the Apache Software Foundation (ASF) under one or more
+ - contributor license agreements.  See the NOTICE file distributed with
+ - this work for additional information regarding copyright ownership.
+ - The ASF licenses this file to You under the Apache License, Version 2.0
+ - (the "License"); you may not use this file except in compliance with
+ - the License.  You may obtain a copy of the License at
+ -
+ -   http://www.apache.org/licenses/LICENSE-2.0
+ -
+ - Unless required by applicable law or agreed to in writing, software
+ - distributed under the License is distributed on an "AS IS" BASIS,
+ - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ - See the License for the specific language governing permissions and
+ - limitations under the License.
+ -->
+
 # Iceberg Table Spec
 
 This is a specification for the Iceberg table format that is designed to manage a large, slow-changing collection of files in a distributed file system or key-value store as a table.
@@ -79,7 +96,7 @@ A **`map`** is a collection of key-value pairs with a key type and a value type.
 | **`long`**         | 64-bit signed integers                                                   |                                                  |
 | **`float`**        | [32-bit IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) floating point | Can promote to double                            |
 | **`double`**       | [64-bit IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) floating point |                                                  |
-| **`decimal(P,S)`** | Fixed-point decimal; precision P, scale S                                | Scale is fixed [1], Precision must be 38 or less |
+| **`decimal(P,S)`** | Fixed-point decimal; precision P, scale S                                | Scale is fixed [1], precision must be 38 or less |
 | **`date`**         | Calendar date without timezone or time                                   |                                                  |
 | **`time`**         | Time of day without date, timezone                                       | Microsecond precision [2]                        |
 | **`timestamp`**    | Timestamp without timezone                                               | Microsecond precision [2]                        |
@@ -265,7 +282,7 @@ Valid snapshots are stored as a list in table metadata. For serialization, see A
 
 Scans are planned by reading the manifest files for the current snapshot listed in the table metadata. Deleted entries in a manifest are not included in the scan.
 
-For each manifest, scan predicates, which filter data rows, are converted to partition predicates, which filter data files. These partition predicates are used select the data files in the manifest. This conversion uses the partition spec used to write the manifest file.
+For each manifest, scan predicates, which filter data rows, are converted to partition predicates, which filter data files. These partition predicates are used to select the data files in the manifest. This conversion uses the partition spec used to write the manifest file.
 
 Scan predicates are converted to partition predicates using an inclusive projection: if a scan predicate matches a row, then the partition predicate must match that row’s partition. This is an _inclusive projection_ [1] because rows that do not match the scan predicate may be included in the scan by the partition predicate.
 

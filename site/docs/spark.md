@@ -1,3 +1,20 @@
+<!--
+ - Licensed to the Apache Software Foundation (ASF) under one or more
+ - contributor license agreements.  See the NOTICE file distributed with
+ - this work for additional information regarding copyright ownership.
+ - The ASF licenses this file to You under the Apache License, Version 2.0
+ - (the "License"); you may not use this file except in compliance with
+ - the License.  You may obtain a copy of the License at
+ -
+ -   http://www.apache.org/licenses/LICENSE-2.0
+ -
+ - Unless required by applicable law or agreed to in writing, software
+ - distributed under the License is distributed on an "AS IS" BASIS,
+ - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ - See the License for the specific language governing permissions and
+ - limitations under the License.
+ -->
+
 # Spark
 
 Iceberg uses Spark's DataSourceV2 API for data source and catalog implementations. Spark DSv2 is an evolving API with different levels of support in Spark versions.
@@ -80,19 +97,20 @@ spark.sql("""select count(1) from table""").show()
 
 ### Appending data
 
-To append a dataframe to an Iceberg table, use the `iceberg` format with `DataFrameReader`:
+To append a dataframe to an Iceberg table, use the `iceberg` format with `append` mode in the `DataFrameWriter`:
 
 ```scala
 val data: DataFrame = ...
 data.write
     .format("iceberg")
+    .mode("append")
     .save("db.table")
 ```
 
 
 ### Overwriting data
 
-To overwrite values in an Iceberg table, use `overwrite` mode in the `DataFrameReader`:
+To overwrite values in an Iceberg table, use `overwrite` mode in the `DataFrameWriter`:
 
 ```scala
 val data: DataFrame = ...
@@ -184,7 +202,7 @@ order by made_current_at
 
 #### Manifests
 
-To show the a table's file manifests and each file's metadata, run:
+To show a table's file manifests and each file's metadata, run:
 
 ```scala
 spark.read.format("iceberg").load("db.table.manifests").show(truncate = false)
@@ -199,7 +217,7 @@ spark.read.format("iceberg").load("db.table.manifests").show(truncate = false)
 
 #### Files
 
-To show the a table's data files and each file's metadata, run:
+To show a table's data files and each file's metadata, run:
 
 ```scala
 spark.read.format("iceberg").load("db.table.files").show(truncate = false)

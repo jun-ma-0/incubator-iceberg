@@ -85,7 +85,7 @@ class V1VectorizedTaskDataReader implements InputPartitionReader<ColumnarBatch> 
 
     // open after initializing everything
     this.currentIterator = open(tasks.next());
-    LOG.warn("V1VectorizedTaskDataReader initialized.");
+    LOG.warn("=> V1VectorizedTaskDataReader initialized.");
   }
 
   @Override
@@ -173,6 +173,9 @@ class V1VectorizedTaskDataReader implements InputPartitionReader<ColumnarBatch> 
 
   private scala.collection.Iterator<InternalRow> buildV1VectorizedBatchReader(FileScanTask task) {
 
+    LOG.warn("=> V1VectorizedTaskDataReader:: buildV1VectorizedBatchReader");
+    // Run inside the Executor
+    //   Construct partition file from file info inside executor
     Class<?> clazz = PartitionedFile.class;
     Constructor<?> ctor = clazz.getConstructors()[0]; // we know PartitionedFile has only one constructor
     PartitionedFile partitionedFile;

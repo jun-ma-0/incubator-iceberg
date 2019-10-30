@@ -19,9 +19,13 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.io.Serializable;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CombinedScanTask;
@@ -41,6 +45,7 @@ import org.apache.iceberg.spark.SparkFilters;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
+import org.apache.spark.SparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.execution.datasources.PartitionedFile;
@@ -60,7 +65,9 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import scala.collection.JavaConverters;
 import scala.collection.Seq;
+import scala.collection.immutable.Map;
 import scala.collection.mutable.ArrayBuffer;
 
 class V1VectorizedReader implements SupportsScanColumnarBatch,
@@ -68,7 +75,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     SupportsPushDownFilters,
     SupportsPushDownRequiredColumns,
     SupportsReportStatistics {
-  private static final Logger LOG = LoggerFactory.getLogger(Reader.class);
+  private static final Logger LOG = LoggerFactory.getLogger(V1VectorizedReader.class);
 
   private static final Filter[] NO_FILTERS = new Filter[0];
 
@@ -123,7 +130,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     this.sparkSession = sparkSession;
     this.options = options;
 
-    LOG.debug("=> Set Config numRecordsPerBatch: {}, " +
+    LOG.warn("=> Set Config numRecordsPerBatch: {}, " +
             "Split size: {}, " +
             "Planning Thread count: {}, " +
             "Max Num Vectorized Fields: {}",
@@ -205,11 +212,11 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       long readTaskStart = System.currentTimeMillis();
       readTasks.add(
           new ReadTask(task, tableSchemaString, expectedSchemaString, fileIo, encryptionManager, caseSensitive,
-              partitionFunction));
-      LOG.debug("=> ReadTask creating time took {} ms.", System.currentTimeMillis() - readTaskStart);
+              partitionFunction, sparkSession.sparkContext()));
+      LOG.warn("=> ReadTask creating time took {} ms.", System.currentTimeMillis() - readTaskStart);
     }
-    LOG.debug("=> Input Task planning took {} seconds.", (System.currentTimeMillis() - start) / 1000.0f);
-    LOG.debug("=> Spark Schema: {}", sparkReadSchema);
+    LOG.warn("=> Input Task planning took {} seconds.", (System.currentTimeMillis() - start) / 1000.0f);
+    LOG.warn("=> Spark Schema: {}", sparkReadSchema);
 
     return readTasks;
   }
@@ -261,7 +268,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   public void pruneColumns(StructType newRequestedSchema) {
     this.requestedSchema = newRequestedSchema;
 
-    LOG.debug("=> Prune columns : {}", newRequestedSchema.prettyJson());
+    LOG.warn("=> Prune columns : {}", newRequestedSchema.prettyJson());
     // invalidate the schema that will be projected
     this.schema = null;
     this.type = null;
@@ -314,6 +321,51 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     return new Stats(sizeInBytes, numRows);
   }
 
+  private java.util.Map<String, List<PartitionedFile>> fetchHostToFileIndexMap(SparkContext sparkContext,
+      List<PartitionedFile> partitionedFileList) {
+
+    Map<String, List<PartitionedFile>> indexMap;
+    java.util.Map<String, List<PartitionedFile>> javaMap;
+    try {
+      LOG.warn("=> Fetching  host to file index from Databricks Locality Manager ..");
+      // class - com.databricks.sql.io.caching.ParquetLocalityManager
+      Class localityManagerClazz = Class.forName("com.databricks.sql.io.caching.ParquetLocalityManager");
+      LOG.warn("=> Loaded class : {}", localityManagerClazz.getCanonicalName());
+
+      // call - def bucketByHost(sc: SparkContext, partFiles: Seq[PartitionedFile])
+      //              : Map[HostName, Seq[PartitionedFile]]
+      Method bucketByHostMethod = localityManagerClazz.getMethod("bucketByHost",
+          SparkContext.class, Seq.class);
+
+      LOG.warn("=> Loaded method : {}", bucketByHostMethod);
+
+      for (Class param : bucketByHostMethod.getParameterTypes()) {
+        LOG.warn("=>     param type: {}", param);
+      }
+      LOG.warn("=>     return param type: {}", bucketByHostMethod.getReturnType());
+
+      // List<PartitionedFile> pfList = new ArrayList<>();
+      Object indexObj = bucketByHostMethod.invoke(null, sparkContext,
+          JavaConverters.asScalaBufferConverter(partitionedFileList).asScala().toSeq());
+
+      LOG.warn("=> Bucket by host method returned class : {}", indexObj.getClass().getName());
+      LOG.warn("=> Bucket by host method returned obj : {}",  indexObj);
+
+      indexMap = (Map) indexObj;
+      LOG.warn("=> Downcasted to map: {}",  indexMap);
+
+      javaMap = JavaConverters.mapAsJavaMapConverter(indexMap).asJava();
+      LOG.warn("=> Java map: {}",  javaMap);
+
+    } catch (ReflectiveOperationException roe) {
+
+      // LOG.error("Fetching index map threw an error ... ");
+      throw new RuntimeException(roe);
+    }
+
+    return javaMap;
+  }
+
   private List<CombinedScanTask> tasks() {
     if (tasks == null) {
       TableScan scan = table
@@ -347,11 +399,50 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
         }
       }
 
+      LOG.warn("=> Scan class : {}", scan.getClass());
+      // Build partitioned file list
+      LOG.warn("=> ReadTask: Building Partitioned Files ..");
+      List<PartitionedFile> partitionedFileList = new ArrayList();
+      long start = System.currentTimeMillis();
+      List<FileScanTask> fileScanTasks = ImmutableList.copyOf(scan.planFiles());
+      for (FileScanTask fileScanTask : fileScanTasks) {
+        // Create partitioned file
+        Class<?> clazz = PartitionedFile.class;
+        Constructor<?> ctor = clazz.getConstructors()[0]; // we know PartitionedFile has only one constructor
+        PartitionedFile partitionedFile;
+        try {
+          // Pick partition fields
+          partitionedFile = (PartitionedFile)
+              ctor.newInstance(InternalRow.empty(),   fileScanTask.file().path().toString(),
+                  fileScanTask.start(), fileScanTask.length(), null);
+
+          partitionedFileList.add(partitionedFile);
+
+        } catch (Throwable t) {
+          throw new RuntimeException("Could not instantiate PartitionedFile", t);
+        }
+      }
+      LOG.warn("=> ReadTask: Partitioned File List: {}, took {} seconds", partitionedFileList,
+          (System.currentTimeMillis() - start) / 1000.0f);
+
+      // Fetch host to file index
+      LOG.warn("=> ReadTask: Fetch Host-To-File Index Map");
+      java.util.Map<String, List<PartitionedFile>> hostToFileIndex = fetchHostToFileIndexMap(
+          sparkSession.sparkContext(), partitionedFileList);
+      LOG.warn("=> ReadTask: Host to file index map : {}, took {} seconds", hostToFileIndex,
+          (System.currentTimeMillis() - start) / 1000.0f);
+
+      List<String> partitionHosts = Lists.newArrayList(hostToFileIndex.keySet());
+      LOG.warn("=> ReadTask: Host List : {}, took {} seconds", partitionHosts,
+          (System.currentTimeMillis() - start) / 1000.0f);
+
       try (CloseableIterable<CombinedScanTask> tasksIterable = scan.planTasks()) {
         this.tasks = Lists.newArrayList(tasksIterable);
       }  catch (IOException e) {
         throw new RuntimeIOException(e, "Failed to close table scan: %s", scan);
       }
+
+
     }
 
     return tasks;
@@ -372,6 +463,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     private final EncryptionManager encryptionManager;
     private final boolean caseSensitive;
     private final scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> buildReaderFunc;
+    // private final List<String> preferredHosts;
 
     private transient Schema tableSchema = null;
     private transient Schema expectedSchema = null;
@@ -379,7 +471,8 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     private ReadTask(
         CombinedScanTask task, String tableSchemaString, String expectedSchemaString, FileIO fileIo,
         EncryptionManager encryptionManager, boolean caseSensitive,
-        scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> partitionFunction) {
+        scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> partitionFunction,
+        SparkContext sparkContext) {
       this.task = task;
       this.tableSchemaString = tableSchemaString;
       this.expectedSchemaString = expectedSchemaString;
@@ -387,14 +480,22 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       this.encryptionManager = encryptionManager;
       this.caseSensitive = caseSensitive;
 
-      LOG.debug("=> Build partition reader function ");
+      LOG.warn("=> init ReadTask");
       this.buildReaderFunc = partitionFunction;
+
     }
+
+    // @Override
+    // public String[] preferredLocations() {
+    //
+    //   LOG.warn("=> ReadTask: preferred locations : {}", preferredHosts);
+    //   return preferredHosts.toArray(new String[preferredHosts.size()]);
+    // }
 
     @Override
     public InputPartitionReader<ColumnarBatch> createPartitionReader() {
 
-      LOG.debug("=> Create Partition Reader");
+      LOG.warn("=> ReadTask Create Partition Reader");
       return new V1VectorizedTaskDataReader(task, lazyTableSchema(), lazyExpectedSchema(), fileIo,
             encryptionManager, caseSensitive, buildReaderFunc);
     }
@@ -412,6 +513,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       }
       return expectedSchema;
     }
+
   }
 
 }

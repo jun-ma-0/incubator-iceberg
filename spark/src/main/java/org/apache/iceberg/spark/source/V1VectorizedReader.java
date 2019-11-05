@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.io.IOException;
@@ -26,8 +27,11 @@ import java.io.Serializable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.BaseCombinedScanTask;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
@@ -45,6 +49,7 @@ import org.apache.iceberg.spark.SparkFilters;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.BinPacking;
 import org.apache.spark.SparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -103,6 +108,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private Schema schema = null;
   private StructType type = null; // cached because Spark accesses it multiple times
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
+  private boolean bucketTasksByLocality;
 
   V1VectorizedReader(Table table, boolean caseSensitive, DataSourceOptions options,
       Configuration hadoopConf, int numRecordsPerBatch, SparkSession sparkSession) {
@@ -117,10 +123,18 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
 
     this.numRecordsPerBatch = numRecordsPerBatch;
 
+    // Pick from reader options, if not there then look in table properties, if not use default
+    this.splitSize = options.get("split-size").map(Long::parseLong)
+        .orElse(Long.parseLong(table.properties().getOrDefault(TableProperties.SPLIT_SIZE,
+            "" + TableProperties.SPLIT_SIZE_DEFAULT)));
+    this.splitLookback = options.get("lookback").map(Integer::parseInt)
+        .orElse(Integer.parseInt(table.properties().getOrDefault(TableProperties.SPLIT_LOOKBACK,
+            "" + TableProperties.SPLIT_LOOKBACK_DEFAULT)));
+    this.splitOpenFileCost = options.get("file-open-cost").map(Long::parseLong)
+        .orElse(Long.parseLong(table.properties().getOrDefault(TableProperties.SPLIT_OPEN_FILE_COST,
+            "" + TableProperties.SPLIT_OPEN_FILE_COST_DEFAULT)));
 
-    this.splitSize = options.get("split-size").map(Long::parseLong).orElse(null);
-    this.splitLookback = options.get("lookback").map(Integer::parseInt).orElse(null);
-    this.splitOpenFileCost = options.get("file-open-cost").map(Long::parseLong).orElse(null);
+    this.bucketTasksByLocality = options.get("bucket-tasks-by-locality").map(Boolean::parseBoolean).orElse(false);
 
     this.schema = table.schema();
     this.fileIo = table.io();
@@ -130,7 +144,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     this.sparkSession = sparkSession;
     this.options = options;
 
-    LOG.warn("=> Set Config numRecordsPerBatch: {}, " +
+    LOG.debug("=> Set Config numRecordsPerBatch: {}, " +
             "Split size: {}, " +
             "Planning Thread count: {}, " +
             "Max Num Vectorized Fields: {}",
@@ -212,11 +226,11 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       long readTaskStart = System.currentTimeMillis();
       readTasks.add(
           new ReadTask(task, tableSchemaString, expectedSchemaString, fileIo, encryptionManager, caseSensitive,
-              partitionFunction, sparkSession.sparkContext()));
-      LOG.warn("=> ReadTask creating time took {} ms.", System.currentTimeMillis() - readTaskStart);
+              partitionFunction));
+      LOG.debug("ReadTask creating time took {} ms.", System.currentTimeMillis() - readTaskStart);
     }
-    LOG.warn("=> Input Task planning took {} seconds.", (System.currentTimeMillis() - start) / 1000.0f);
-    LOG.warn("=> Spark Schema: {}", sparkReadSchema);
+    LOG.debug("Input Task planning took {} seconds.", (System.currentTimeMillis() - start) / 1000.0f);
+    LOG.debug("Spark Schema: {}", sparkReadSchema);
 
     return readTasks;
   }
@@ -268,7 +282,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   public void pruneColumns(StructType newRequestedSchema) {
     this.requestedSchema = newRequestedSchema;
 
-    LOG.warn("=> Prune columns : {}", newRequestedSchema.prettyJson());
+    LOG.warn("Schema Prune columns : {}", newRequestedSchema.prettyJson());
     // invalidate the schema that will be projected
     this.schema = null;
     this.type = null;
@@ -321,49 +335,25 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     return new Stats(sizeInBytes, numRows);
   }
 
-  private java.util.Map<String, List<PartitionedFile>> fetchHostToFileIndexMap(SparkContext sparkContext,
+  private java.util.Map<String, ArrayBuffer<PartitionedFile>> fetchHostToFileIndexMap(SparkContext sparkContext,
       List<PartitionedFile> partitionedFileList) {
 
-    Map<String, List<PartitionedFile>> indexMap;
-    java.util.Map<String, List<PartitionedFile>> javaMap;
+    Map<String, ArrayBuffer<PartitionedFile>> indexMap;
     try {
-      LOG.warn("=> Fetching  host to file index from Databricks Locality Manager ..");
       // class - com.databricks.sql.io.caching.ParquetLocalityManager
       Class localityManagerClazz = Class.forName("com.databricks.sql.io.caching.ParquetLocalityManager");
-      LOG.warn("=> Loaded class : {}", localityManagerClazz.getCanonicalName());
-
       // call - def bucketByHost(sc: SparkContext, partFiles: Seq[PartitionedFile])
       //              : Map[HostName, Seq[PartitionedFile]]
       Method bucketByHostMethod = localityManagerClazz.getMethod("bucketByHost",
           SparkContext.class, Seq.class);
-
-      LOG.warn("=> Loaded method : {}", bucketByHostMethod);
-
-      for (Class param : bucketByHostMethod.getParameterTypes()) {
-        LOG.warn("=>     param type: {}", param);
-      }
-      LOG.warn("=>     return param type: {}", bucketByHostMethod.getReturnType());
-
-      // List<PartitionedFile> pfList = new ArrayList<>();
       Object indexObj = bucketByHostMethod.invoke(null, sparkContext,
           JavaConverters.asScalaBufferConverter(partitionedFileList).asScala().toSeq());
-
-      LOG.warn("=> Bucket by host method returned class : {}", indexObj.getClass().getName());
-      LOG.warn("=> Bucket by host method returned obj : {}",  indexObj);
-
       indexMap = (Map) indexObj;
-      LOG.warn("=> Downcasted to map: {}",  indexMap);
-
-      javaMap = JavaConverters.mapAsJavaMapConverter(indexMap).asJava();
-      LOG.warn("=> Java map: {}",  javaMap);
+      return JavaConverters.mapAsJavaMapConverter(indexMap).asJava();
 
     } catch (ReflectiveOperationException roe) {
-
-      // LOG.error("Fetching index map threw an error ... ");
       throw new RuntimeException(roe);
     }
-
-    return javaMap;
   }
 
   private List<CombinedScanTask> tasks() {
@@ -399,53 +389,121 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
         }
       }
 
-      LOG.warn("=> Scan class : {}", scan.getClass());
-      // Build partitioned file list
-      LOG.warn("=> ReadTask: Building Partitioned Files ..");
-      List<PartitionedFile> partitionedFileList = new ArrayList();
-      long start = System.currentTimeMillis();
-      List<FileScanTask> fileScanTasks = ImmutableList.copyOf(scan.planFiles());
-      for (FileScanTask fileScanTask : fileScanTasks) {
-        // Create partitioned file
-        Class<?> clazz = PartitionedFile.class;
-        Constructor<?> ctor = clazz.getConstructors()[0]; // we know PartitionedFile has only one constructor
-        PartitionedFile partitionedFile;
-        try {
-          // Pick partition fields
-          partitionedFile = (PartitionedFile)
-              ctor.newInstance(InternalRow.empty(),   fileScanTask.file().path().toString(),
-                  fileScanTask.start(), fileScanTask.length(), null);
+      // We try split bucketing if the flag is set, this makes use of the Databricks Parquet File Locality Manager
+      //   which maintains a deterministic affinity for hosts to files. The mapping helps us with IO caching.
+      //   The bucketing should remain the same if number of files and hosts remain consistent.
+      if (bucketTasksByLocality) {
 
-          partitionedFileList.add(partitionedFile);
+        // Build tasks bucketed by hosts
+        LOG.debug("Bucketing by hosts engaged..");
 
-        } catch (Throwable t) {
-          throw new RuntimeException("Could not instantiate PartitionedFile", t);
+        // Build partitioned file list
+        List<PartitionedFile> partitionedFileList = new ArrayList();
+        long start = System.currentTimeMillis();
+        List<FileScanTask> fileScanTasks = ImmutableList.copyOf(scan.planFiles());
+        java.util.Map<PartitionedFile, FileScanTask> fileToScanTaskLookup = new HashMap<>();
+        java.util.Map<String, ArrayBuffer<PartitionedFile>> partitionedFilesByHost =
+            buildPartitionedFilesByHost(partitionedFileList, fileScanTasks, fileToScanTaskLookup);
+
+        // build tasks by host if the locality manager returned bucketed partitioned files,
+        //  if this is the first query or the cluster cache state is cold then do default task planning
+        if (partitionedFilesByHost != null || partitionedFilesByHost.size() > 1) {
+          buildCombinedScanTasksBucketedByHost(fileToScanTaskLookup, partitionedFilesByHost);
+        } else {
+          defaultTaskPlanning(scan);
         }
+
+      } else {
+        LOG.debug("Bucketing by hosts not engaged..");
+        // default task splitting
+        defaultTaskPlanning(scan);
       }
-      LOG.warn("=> ReadTask: Partitioned File List: {}, took {} seconds", partitionedFileList,
-          (System.currentTimeMillis() - start) / 1000.0f);
-
-      // Fetch host to file index
-      LOG.warn("=> ReadTask: Fetch Host-To-File Index Map");
-      java.util.Map<String, List<PartitionedFile>> hostToFileIndex = fetchHostToFileIndexMap(
-          sparkSession.sparkContext(), partitionedFileList);
-      LOG.warn("=> ReadTask: Host to file index map : {}, took {} seconds", hostToFileIndex,
-          (System.currentTimeMillis() - start) / 1000.0f);
-
-      List<String> partitionHosts = Lists.newArrayList(hostToFileIndex.keySet());
-      LOG.warn("=> ReadTask: Host List : {}, took {} seconds", partitionHosts,
-          (System.currentTimeMillis() - start) / 1000.0f);
-
-      try (CloseableIterable<CombinedScanTask> tasksIterable = scan.planTasks()) {
-        this.tasks = Lists.newArrayList(tasksIterable);
-      }  catch (IOException e) {
-        throw new RuntimeIOException(e, "Failed to close table scan: %s", scan);
-      }
-
-
     }
 
     return tasks;
+  }
+
+  private void defaultTaskPlanning(TableScan scan) {
+    try (CloseableIterable<CombinedScanTask> tasksIterable = scan.planTasks()) {
+      this.tasks = Lists.newArrayList(tasksIterable);
+    } catch (IOException e) {
+      throw new RuntimeIOException(e, "Failed to close table scan: %s", scan);
+    }
+  }
+
+  private void buildCombinedScanTasksBucketedByHost(
+      java.util.Map<PartitionedFile, FileScanTask> fileToScanTaskLookup,
+      java.util.Map<String, ArrayBuffer<PartitionedFile>> partitionedFilesByHost) {
+
+    tasks = new ArrayList<>();
+    for (java.util.Map.Entry<String, ArrayBuffer<PartitionedFile>> entry : partitionedFilesByHost.entrySet()) {
+      List<PartitionedFile> partitionedFilesInBucket =
+          JavaConverters.bufferAsJavaListConverter(entry.getValue()).asJava();
+
+      LOG.debug("Bucketed Partitioned Files size : {}", partitionedFilesInBucket.size());
+      List<FileScanTask> fileScanTasksInBucket = Lists.transform(
+          partitionedFilesInBucket,
+          new Function<PartitionedFile, FileScanTask>() {
+            public FileScanTask apply(PartitionedFile pf) {
+              return fileToScanTaskLookup.get(pf);
+            }
+            ;
+          });
+
+      // split this bucket as per split size
+      java.util.function.Function<FileScanTask, Long> weightFunc = file -> Math.max(file.length(), splitOpenFileCost);
+
+      CloseableIterable<FileScanTask> filesIterator = new CloseableIterable<FileScanTask>() {
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public Iterator<FileScanTask> iterator() {
+          return fileScanTasksInBucket.iterator();
+        }
+      };
+      CloseableIterable<CombinedScanTask> binnedTasksIterator = CloseableIterable.transform(
+          CloseableIterable.combine(
+              new BinPacking.PackingIterable<>(filesIterator,
+                    splitSize, splitLookback, weightFunc, true), // pick largest bin first
+              filesIterator),
+          BaseCombinedScanTask::new);
+
+      List<CombinedScanTask> binnedTasks = Lists.newArrayList(binnedTasksIterator);
+
+      LOG.debug("Bucket: {} :: Binned Combined tasks : {}", entry.getKey(), binnedTasks.size());
+      this.tasks.addAll(binnedTasks);
+    }
+  }
+
+  private java.util.Map<String, ArrayBuffer<PartitionedFile>> buildPartitionedFilesByHost(
+      List<PartitionedFile> partitionedFileList, List<FileScanTask> fileScanTasks,
+      java.util.Map<PartitionedFile, FileScanTask> fileToScanTaskLookup) {
+
+    Class<?> clazz = PartitionedFile.class;
+    Constructor<?> ctor = clazz.getConstructors()[0]; // we know PartitionedFile has only one constructor
+    for (FileScanTask fileScanTask : fileScanTasks) {
+      // Create partitioned file
+      PartitionedFile partitionedFile;
+      try {
+        // Pick partition fields
+        partitionedFile = (PartitionedFile)
+            ctor.newInstance(
+                InternalRow.empty(),   fileScanTask.file().path().toString(),
+                fileScanTask.start(), fileScanTask.length(), null);
+
+        partitionedFileList.add(partitionedFile);
+        fileToScanTaskLookup.put(partitionedFile, fileScanTask);
+
+      } catch (Throwable t) {
+        throw new RuntimeIOException("Could not instantiate PartitionedFile", t);
+      }
+    }
+
+    // Fetch host to file index
+    return fetchHostToFileIndexMap(
+        sparkSession.sparkContext(), partitionedFileList);
   }
 
   @Override
@@ -463,7 +521,6 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     private final EncryptionManager encryptionManager;
     private final boolean caseSensitive;
     private final scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> buildReaderFunc;
-    // private final List<String> preferredHosts;
 
     private transient Schema tableSchema = null;
     private transient Schema expectedSchema = null;
@@ -471,31 +528,21 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     private ReadTask(
         CombinedScanTask task, String tableSchemaString, String expectedSchemaString, FileIO fileIo,
         EncryptionManager encryptionManager, boolean caseSensitive,
-        scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> partitionFunction,
-        SparkContext sparkContext) {
+        scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> partitionFunction) {
       this.task = task;
       this.tableSchemaString = tableSchemaString;
       this.expectedSchemaString = expectedSchemaString;
       this.fileIo = fileIo;
       this.encryptionManager = encryptionManager;
       this.caseSensitive = caseSensitive;
-
-      LOG.warn("=> init ReadTask");
       this.buildReaderFunc = partitionFunction;
 
     }
 
-    // @Override
-    // public String[] preferredLocations() {
-    //
-    //   LOG.warn("=> ReadTask: preferred locations : {}", preferredHosts);
-    //   return preferredHosts.toArray(new String[preferredHosts.size()]);
-    // }
-
     @Override
     public InputPartitionReader<ColumnarBatch> createPartitionReader() {
 
-      LOG.warn("=> ReadTask Create Partition Reader");
+      LOG.debug("Create Partition Reader");
       return new V1VectorizedTaskDataReader(task, lazyTableSchema(), lazyExpectedSchema(), fileIo,
             encryptionManager, caseSensitive, buildReaderFunc);
     }

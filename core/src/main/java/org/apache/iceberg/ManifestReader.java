@@ -28,7 +28,6 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import org.apache.iceberg.avro.Avro;
 import org.apache.iceberg.avro.AvroIterable;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -45,15 +44,15 @@ import static org.apache.iceberg.expressions.Expressions.alwaysTrue;
 /**
  * Reader for manifest files.
  * <p>
- * Readers are created using the builder from {@link #read(InputFile, Function)}.
+ * Readers are created using the builder from {@link #read(InputFile, Map)}.
  */
 public class ManifestReader extends CloseableGroup implements Filterable<FilteredManifest> {
   private static final Logger LOG = LoggerFactory.getLogger(ManifestReader.class);
 
-  private static final List<String> ALL_COLUMNS = ImmutableList.of("*");
-  static final List<String> CHANGE_COLUMNS = ImmutableList.of(
+  private static final ImmutableList<String> ALL_COLUMNS = ImmutableList.of("*");
+  static final ImmutableList<String> CHANGE_COLUMNS = ImmutableList.of(
       "file_path", "file_format", "partition", "record_count", "file_size_in_bytes");
-  static final List<String> CHANGE_WITH_STATS_COLUMNS = ImmutableList.<String>builder()
+  static final ImmutableList<String> CHANGE_WITH_STATS_COLUMNS = ImmutableList.<String>builder()
       .addAll(CHANGE_COLUMNS)
       .add("value_counts", "null_value_counts", "lower_bounds", "upper_bounds")
       .build();
@@ -61,7 +60,7 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
   /**
    * Returns a new {@link ManifestReader} for an {@link InputFile}.
    * <p>
-   * <em>Note:</em> Most callers should use {@link #read(InputFile, Function)} to ensure that the
+   * <em>Note:</em> Most callers should use {@link #read(InputFile, Map)} to ensure that the
    * schema used by filters is the latest table schema. This should be used only when reading a
    * manifest without filters.
    *
@@ -76,11 +75,11 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
    * Returns a new {@link ManifestReader} for an {@link InputFile}.
    *
    * @param file an InputFile
-   * @param specLookup a function to look up the manifest's partition spec by ID
+   * @param specsById a Map from spec ID to partition spec
    * @return a manifest reader
    */
-  public static ManifestReader read(InputFile file, Function<Integer, PartitionSpec> specLookup) {
-    return new ManifestReader(file, specLookup);
+  public static ManifestReader read(InputFile file, Map<Integer, PartitionSpec> specsById) {
+    return new ManifestReader(file, specsById);
   }
 
   private final InputFile file;
@@ -92,7 +91,7 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
   private List<ManifestEntry> cachedAdds = null;
   private List<ManifestEntry> cachedDeletes = null;
 
-  private ManifestReader(InputFile file, Function<Integer, PartitionSpec> specLookup) {
+  private ManifestReader(InputFile file, Map<Integer, PartitionSpec> specsById) {
     this.file = file;
 
     try {
@@ -111,8 +110,8 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
       specId = Integer.parseInt(specProperty);
     }
 
-    if (specLookup != null) {
-      this.spec = specLookup.apply(specId);
+    if (specsById != null) {
+      this.spec = specsById.get(specId);
     } else {
       Schema schema = SchemaParser.fromJson(metadata.get("schema"));
       this.spec = PartitionSpecParser.fromJsonFields(schema, specId, metadata.get("partition-spec"));
@@ -153,6 +152,7 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
     return new FilteredManifest(this, alwaysTrue(), expr, fileSchema, ALL_COLUMNS, true);
   }
 
+  @Override
   public FilteredManifest caseSensitive(boolean caseSensitive) {
     return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileSchema, ALL_COLUMNS, caseSensitive);
   }

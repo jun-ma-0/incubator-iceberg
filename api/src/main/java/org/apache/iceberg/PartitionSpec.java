@@ -33,13 +33,13 @@ import java.net.URLEncoder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.transforms.Transforms;
 import org.apache.iceberg.transforms.UnknownTransform;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.StructType;
 
 /**
  * Represents how to produce partition data for a table.
@@ -100,9 +100,9 @@ public class PartitionSpec implements Serializable {
   }
 
   /**
-   * @return a {@link Types.StructType} for partition data defined by this spec.
+   * @return a {@link StructType} for partition data defined by this spec.
    */
-  public Types.StructType partitionType() {
+  public StructType partitionType() {
     List<Types.NestedField> structFields = Lists.newArrayListWithExpectedSize(fields.length);
 
     for (int i = 0; i < fields.length; i += 1) {
@@ -201,8 +201,7 @@ public class PartitionSpec implements Serializable {
   public boolean equals(Object other) {
     if (this == other) {
       return true;
-    }
-    if (other == null || getClass() != other.getClass()) {
+    } else if (!(other instanceof PartitionSpec)) {
       return false;
     }
 
@@ -215,7 +214,7 @@ public class PartitionSpec implements Serializable {
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(Arrays.hashCode(fields));
+    return Integer.hashCode(Arrays.hashCode(fields));
   }
 
   private List<PartitionField> lazyFieldList() {
@@ -467,7 +466,7 @@ public class PartitionSpec implements Serializable {
     Builder add(int sourceId, String name, String transform) {
       Types.NestedField column = schema.findField(sourceId);
       checkAndAddPartitionName(name, column.fieldId());
-      Preconditions.checkNotNull(column, "Cannot find source column: %d", sourceId);
+      Preconditions.checkNotNull(column, "Cannot find source column: %s", sourceId);
       fields.add(new PartitionField(sourceId, name, Transforms.fromString(column.type(), transform)));
       return this;
     }

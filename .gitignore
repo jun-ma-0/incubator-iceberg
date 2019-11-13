@@ -3,10 +3,14 @@
 *.ipr
 *.iws
 *.iml
+
 # gradle build
 .gradle
 build
+gradle/
 out
+gradle/wrapper/gradle-wrapper.jar
+
 # web site build
 site/site
 
@@ -25,3 +29,6 @@ sdist/
 coverage.xml
 .pytest_cache/
 spark/tmp/
+
+# vscode/eclipse files
+.project

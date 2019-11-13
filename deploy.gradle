@@ -96,16 +96,17 @@ subprojects {
       }
     }
 
+    // Adobe repositories
     repositories {
       maven {
+        name 'Experience Platform Repositories'
+        def releasesRepoUrl  = "https://artifactory.corp.adobe.com/artifactory/maven-experienceplatform-release/"
+        def snapshotsRepoUrl = "https://artifactory.corp.adobe.com/artifactory/maven-experienceplatform-snapshot/"
+        url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
         credentials {
-          username project.hasProperty('mavenUser') ? "$mavenUser" : ""
-          password project.hasProperty('mavenPassword') ? "$mavenPassword" : ""
+          username = "${artifactory_user_p}" == "" ? System.getenv("ARTIFACTORY_USER") : "${artifactory_user_p}"
+          password = "${artifactory_key_p}" == "" ? System.getenv("ARTIFACTORY_API_TOKEN") : "${artifactory_key_p}"
         }
-        // upload to the releases repository using ./gradlew -Prelease publish
-        def snapshotsRepoUrl = 'https://repository.apache.org/content/repositories/snapshots'
-        def releasesRepoUrl = 'https://repository.apache.org/service/local/staging/deploy/maven2'
-        url = project.hasProperty('release') ? releasesRepoUrl : snapshotsRepoUrl
       }
     }
   }

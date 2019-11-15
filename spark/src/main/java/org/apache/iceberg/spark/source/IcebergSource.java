@@ -71,6 +71,11 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
 
   @Override
   public DataSourceReader createReader(DataSourceOptions options) {
+    return createReader(null, options);
+  }
+
+  @Override
+  public DataSourceReader createReader(StructType readSchema, DataSourceOptions options) {
     Configuration conf = new Configuration(lazyBaseConf());
     Table table = getTableAndResolveHadoopConfiguration(options, conf);
     String caseSensitive = lazySparkSession().conf().get("spark.sql.caseSensitive", "true");
@@ -86,12 +91,23 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
         Integer.parseInt(numRecordsPerBatchOpt.get()) : V1VectorizedReader.DEFAULT_NUM_ROWS_IN_BATCH;
     if (enableV1VectorizedRead) {
       LOG.debug("V1VectorizedReader engaged.");
-      return new V1VectorizedReader(table, Boolean.valueOf(caseSensitive), options, conf,
+      V1VectorizedReader reader = new V1VectorizedReader(table, Boolean.valueOf(caseSensitive), options, conf,
           numRecordsPerBatch, lazySparkSession());
+      if (readSchema != null) {
+        // convert() will fail if readSchema contains fields not in table.schema()
+        SparkSchemaUtil.convert(table.schema(), readSchema);
+        reader.pruneColumns(readSchema);
+      }
+      return reader;
     } else {
-
       LOG.debug("Non-VectorizedReader engaged.");
-      return new Reader(table, Boolean.valueOf(caseSensitive), options);
+      Reader reader = new Reader(table, Boolean.valueOf(caseSensitive), options);
+      if (readSchema != null) {
+        // convert() will fail if readSchema contains fields not in table.schema()
+        SparkSchemaUtil.convert(table.schema(), readSchema);
+        reader.pruneColumns(readSchema);
+      }
+      return reader;
     }
   }
 
@@ -151,7 +167,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
 
   private Configuration lazyBaseConf() {
     if (lazyConf == null) {
-      this.lazyConf = lazySparkSession().sparkContext().hadoopConfiguration();
+      this.lazyConf = lazySparkSession().sessionState().newHadoopConf();
     }
     return lazyConf;
   }

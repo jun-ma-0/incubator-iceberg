@@ -25,6 +25,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -91,6 +92,7 @@ class Writer implements DataSourceWriter {
   private final String wapId;
   private final long targetFileSize;
   private final Schema dsSchema;
+  private final Map<String, String> tags;
 
   Writer(Table table, DataSourceOptions options, boolean replacePartitions, String applicationId, Schema dsSchema) {
     this(table, options, replacePartitions, applicationId, null, dsSchema);
@@ -106,6 +108,7 @@ class Writer implements DataSourceWriter {
     this.applicationId = applicationId;
     this.wapId = wapId;
     this.dsSchema = dsSchema;
+    this.tags = getTags(options);
 
     long tableTargetFileSize = PropertyUtil.propertyAsLong(
         table.properties(), WRITE_TARGET_FILE_SIZE_BYTES, WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT);
@@ -117,6 +120,14 @@ class Writer implements DataSourceWriter {
     String formatString = formatOption
         .orElse(tableProperties.getOrDefault(DEFAULT_FILE_FORMAT, DEFAULT_FILE_FORMAT_DEFAULT));
     return FileFormat.valueOf(formatString.toUpperCase(Locale.ENGLISH));
+  }
+
+  private Map<String, String> getTags(DataSourceOptions options) {
+    Map<String, String> tags = new HashMap<>();
+    options.asMap().keySet().stream()
+        .filter(key -> key.startsWith("tags."))
+        .forEach(key -> tags.put(key, options.get(key).get()));
+    return tags;
   }
 
   private boolean isWapTable() {
@@ -151,6 +162,10 @@ class Writer implements DataSourceWriter {
       // stage the changes without changing the current snapshot
       operation.set("wap.id", wapId);
       operation.stageOnly();
+    }
+
+    if(tags != null && !tags.isEmpty()) {
+      tags.forEach((k, v) -> operation.set(k, v));
     }
 
     long start = System.currentTimeMillis();

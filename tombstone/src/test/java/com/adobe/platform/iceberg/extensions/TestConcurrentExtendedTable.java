@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static java.util.stream.Collectors.toList;
@@ -68,7 +69,7 @@ public class TestConcurrentExtendedTable extends WithSpark implements WithExecut
    *
    * @throws InterruptedException in case commit threads are interrupted.
    */
-  @Test
+  @Ignore
   public void testConcurrentCommitsYieldConsistentResultsWithMultipleProducers() throws InterruptedException {
     ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField field = table.schema().findField("batch");

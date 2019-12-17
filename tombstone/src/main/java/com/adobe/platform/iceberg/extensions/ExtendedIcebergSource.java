@@ -88,7 +88,7 @@ public class ExtendedIcebergSource extends IcebergSource
     validateWriteSchema(table.schema(), dsSchema, checkNullability(options));
     validatePartitionTransforms(table.spec());
     String appId = lazySparkSession().sparkContext().applicationId();
-    String wapId = lazySparkSession().conf().get("spark.wap.id", null);
+    String wapId = options.get("wap-id").orElse(lazySparkSession().conf().get("spark.wap.id", null));
     return Optional.of(new ExtendedWriter(table, options, mode == SaveMode.Overwrite, appId, wapId, dsSchema));
   }
 

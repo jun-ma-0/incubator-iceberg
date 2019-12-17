@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.CherryPick;
+import org.apache.iceberg.CherryPickFromTombstoneSnapshot;
 import org.apache.iceberg.ExtendedMergeAppend;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.Snapshot;
@@ -114,6 +116,11 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
         column.fieldId(),
         column.name());
     return tombstoneExtension.get(snapshot, namespaceOf(field));
+  }
+
+  @Override
+  public CherryPick cherrypick() {
+    return new CherryPickFromTombstoneSnapshot(ops);
   }
 
   // Externally we reference a tombstone's namespace by the field name that we apply it to, internally we use the

@@ -90,6 +90,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private final Long splitSize;
   private final Integer splitLookback;
   private final Long splitOpenFileCost;
+  private final Long parquetRowGroupSize;
   private final FileIO fileIo;
   private final EncryptionManager encryptionManager;
   private final boolean caseSensitive;
@@ -133,7 +134,9 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
     this.splitOpenFileCost = options.get("file-open-cost").map(Long::parseLong)
         .orElse(Long.parseLong(table.properties().getOrDefault(TableProperties.SPLIT_OPEN_FILE_COST,
             "" + TableProperties.SPLIT_OPEN_FILE_COST_DEFAULT)));
-
+    this.parquetRowGroupSize = Long.parseLong(table.properties()
+        .getOrDefault(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES,
+        "" + TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES_DEFAULT));
     this.bucketTasksByLocality = options.get("bucket-tasks-by-locality").map(Boolean::parseBoolean).orElse(false);
 
     this.schema = table.schema();
@@ -450,8 +453,14 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
             ;
           });
 
-      // split this bucket as per split size
-      java.util.function.Function<FileScanTask, Long> weightFunc = file -> Math.max(file.length(), splitOpenFileCost);
+      // Split this bucket as per file-size or the parquet-rowgroup-size (whichever higher). When files are much
+      // smaller than the split size we fallback to the parquet rowgroup size. This handling is specialized handling
+      // for the Parquet V1 Reader.
+      // We have modified this to honor parquet rowgroup size (it was file-open-cost earlier) as this increases
+      // parallelism when bucket has files smaller than split size. The impact this has is the Bin Packing will
+      // generate more bins instead of packing all of them into a single bin.
+      LOG.debug("Combine splits based on Parquet Rowgroup size {} as min weight cost", parquetRowGroupSize);
+      java.util.function.Function<FileScanTask, Long> weightFunc = file -> Math.max(file.length(), parquetRowGroupSize);
 
       CloseableIterable<FileScanTask> filesIterator = new CloseableIterable<FileScanTask>() {
         @Override

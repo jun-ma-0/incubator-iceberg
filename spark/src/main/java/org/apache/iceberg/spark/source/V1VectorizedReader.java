@@ -459,8 +459,10 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       // We have modified this to honor parquet rowgroup size (it was file-open-cost earlier) as this increases
       // parallelism when bucket has files smaller than split size. The impact this has is the Bin Packing will
       // generate more bins instead of packing all of them into a single bin.
+      // Additionally we allow overriding this with splitOpenFileCost as before.
       LOG.debug("Combine splits based on Parquet Rowgroup size {} as min weight cost", parquetRowGroupSize);
-      java.util.function.Function<FileScanTask, Long> weightFunc = file -> Math.max(file.length(), parquetRowGroupSize);
+      java.util.function.Function<FileScanTask, Long> weightFunc = file -> Math.max(Math.max(file.length(),
+          parquetRowGroupSize), splitOpenFileCost);
 
       CloseableIterable<FileScanTask> filesIterator = new CloseableIterable<FileScanTask>() {
         @Override

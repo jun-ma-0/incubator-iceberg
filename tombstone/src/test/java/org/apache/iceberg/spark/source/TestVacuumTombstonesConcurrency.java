@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
@@ -13,13 +32,11 @@ import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
-import org.hamcrest.Matcher;
 import org.hamcrest.core.Is;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-import org.mockito.Matchers;
 
 public class TestVacuumTombstonesConcurrency extends WithSpark {
 
@@ -54,17 +71,15 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
       new SimpleRecord(14, now, "Y", "y"),
       new SimpleRecord(15, now, "Y", "y"),
       new SimpleRecord(15, now, "Y", "y"));
-
+  @Rule
+  public ExpectedException exceptionRule = ExpectedException.none();
 
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {
-    tables.create(SimpleRecord.SCHEMA, SimpleRecord.SPEC, tableLocation,
+    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation,
         ImmutableMap.of("extension.skip.inclusive.evaluation", "true")
     );
   }
-
-  @Rule
-  public ExpectedException exceptionRule = ExpectedException.none();
 
   @Test
   public void testVacuumOnNonPartitionColumnWithConcurrentAdditionOfTombstoneRows() {
@@ -82,7 +97,7 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     long snapshotId = table.currentSnapshot().snapshotId();
 
     // Reduce tombstone rows
@@ -125,7 +140,7 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     long snapshotId = table.currentSnapshot().snapshotId();
 
     // Reduce tombstone rows

@@ -175,6 +175,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     return readTasks;
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
   public InputPartition<InternalRow> readTask(CombinedScanTask task, String tableSchemaString,
       String expectedSchemaString, FileIO fileIo, EncryptionManager encryptionManager,
       boolean caseSensitive) {

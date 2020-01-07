@@ -1,12 +1,30 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package com.adobe.platform.iceberg.extensions.tombstone;
 
-import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Predicate;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -30,11 +48,11 @@ public class TombstoneRows {
         Lists.newArrayList(split), Lists.newArrayList());
 
     Predicate<InternalRow> anyTombstoneMatch = internalRow -> {
-      String s = deepFindRow(internalRow, fieldNameIndices);
-      return tombstones.stream().anyMatch(e -> s != null && s.equalsIgnoreCase(e));
+      String value = deepFindRow(internalRow, fieldNameIndices);
+      return tombstones.stream().anyMatch(e -> value != null && value.equalsIgnoreCase(e));
     };
 
-    return Iterators.filter(iter, Predicates.not(anyTombstoneMatch));
+    return Iterators.filter(iter, anyTombstoneMatch.negate()::test);
   }
 
   /**
@@ -65,25 +83,26 @@ public class TombstoneRows {
    * @param tokens list of nested field parts (split by dot character)
    * @param collect the collected (returned) ordered sequence of matching field indices
    */
-  private List<Integer> deepFieldIndexLookup(StructType schema, List<String> tokens,
+  private List<Integer> deepFieldIndexLookup(
+      StructType schema, List<String> tokens,
       List<Integer> collect) {
     if (tokens == null || tokens.isEmpty()) {
       return collect;
     }
     if (tokens.size() == 1) {
       try {
-        int i = schema.fieldIndex(tokens.get(0));
-        collect.add(i);
+        int index = schema.fieldIndex(tokens.get(0));
+        collect.add(index);
         return collect;
       } catch (IllegalArgumentException e) {
         return Collections.emptyList();
       }
     } else {
       try {
-        int i = schema.fieldIndex(tokens.get(0));
-        StructField nestedField = schema.fields()[i];
+        int index = schema.fieldIndex(tokens.get(0));
+        StructField nestedField = schema.fields()[index];
         if (nestedField.dataType() instanceof StructType) {
-          collect.add(i);
+          collect.add(index);
           return deepFieldIndexLookup((StructType) nestedField.dataType(),
               tokens.subList(1, tokens.size()), collect);
         }

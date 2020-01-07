@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
@@ -16,7 +35,7 @@ public class TestExtendedTable extends WithSpark {
 
   @Test
   public void testAdditiveAppendFileWithTombstone() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField batchField = table.schema().findField("batch");
     AppendFiles first = table.newAppendWithTombstonesAdd(
         batchField,
@@ -36,7 +55,8 @@ public class TestExtendedTable extends WithSpark {
         ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
     third.commit();
 
-    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(batchField,
+    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
+        batchField,
         table.currentSnapshot());
     Assert.assertEquals(
         "Expect all appended tombstones are available in the current snapshot",
@@ -46,7 +66,7 @@ public class TestExtendedTable extends WithSpark {
 
   @Test
   public void testAppendFileWithTombstoneOperations() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField batchField = table.schema().findField("batch");
 
     AppendFiles appendFilesAndAddTombstones = table.newAppendWithTombstonesAdd(
@@ -55,17 +75,17 @@ public class TestExtendedTable extends WithSpark {
         ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
 
     // Append files aPath, bPath, cPath and add tombstones `1001`, `2002` and `3003`
-    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.SPEC)
+    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("aPath.parquet")
         .withFileSizeInBytes(12345L)
         .withRecordCount(54321L)
         .build());
-    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.SPEC)
+    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("bPath.parquet")
         .withFileSizeInBytes(12345L)
         .withRecordCount(54321L)
         .build());
-    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.SPEC)
+    appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("cPath.parquet")
         .withFileSizeInBytes(12345L)
         .withRecordCount(54321L)
@@ -76,7 +96,7 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles appendFilesAndRemoveTombstones = table.newAppendWithTombstonesRemove(
         batchField,
         Lists.newArrayList(() -> "1001", () -> "2002"));
-    appendFilesAndRemoveTombstones.appendFile(DataFiles.builder(SimpleRecord.SPEC)
+    appendFilesAndRemoveTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("dPath.parquet")
         .withFileSizeInBytes(12345L)
         .withRecordCount(54321L)
@@ -86,14 +106,15 @@ public class TestExtendedTable extends WithSpark {
     // Append ePath without tombstones operations
     // It's expected that the new snapshot references the previous tombstones files
     AppendFiles appendFiles = table.newAppend();
-    appendFiles.appendFile(DataFiles.builder(SimpleRecord.SPEC)
+    appendFiles.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("ePath.parquet")
         .withFileSizeInBytes(12345L)
         .withRecordCount(54321L)
         .build());
     appendFiles.commit();
 
-    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(batchField,
+    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
+        batchField,
         table.currentSnapshot());
     Assert.assertEquals("Expect only one tombstone made it to the current snapshot", 1,
         currentSnapshotTombstones.size());
@@ -103,7 +124,7 @@ public class TestExtendedTable extends WithSpark {
 
   @Test(expected = java.lang.IllegalArgumentException.class)
   public void testInvalidColumnAppendFileWithTombstone() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField noSuchColumn = table.schema().findField("noSuchColumn");
 
     AppendFiles first = table.newAppendWithTombstonesAdd(
@@ -115,7 +136,7 @@ public class TestExtendedTable extends WithSpark {
 
   @Test(expected = java.lang.IllegalArgumentException.class)
   public void testInvalidColumnAppendFileWithTombstonesRemove() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField noSuchColumn = table.schema().findField("noSuchColumn");
 
     AppendFiles first = table.newAppendWithTombstonesRemove(
@@ -126,14 +147,14 @@ public class TestExtendedTable extends WithSpark {
 
   @Test(expected = java.lang.IllegalArgumentException.class)
   public void testInvalidColumnGetTombstones() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField noSuchColumn = table.schema().findField("noSuchColumn");
     table.getSnapshotTombstones(noSuchColumn, table.currentSnapshot());
   }
 
   @Test
   public void testAppendFileWithTombstonesAndProperties() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField batchField = table.schema().findField("batch");
 
     AppendFiles first = table.newAppendWithTombstonesAdd(
@@ -148,7 +169,8 @@ public class TestExtendedTable extends WithSpark {
         ImmutableMap.of("purgeByMillis", "1571226999000", "reason", "test"));
     second.commit();
 
-    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(batchField,
+    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
+        batchField,
         table.currentSnapshot());
     Assert.assertEquals("Expect that all six tombstones made it to the current snapshot", 6,
         currentSnapshotTombstones.size());
@@ -162,7 +184,7 @@ public class TestExtendedTable extends WithSpark {
 
   @Test
   public void testAppendFileWithTombstonesAndFilterOnDifferentColumn() {
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField batchField = table.schema().findField("batch");
 
     AppendFiles appendFilesAndAddTombstones = table.newAppendWithTombstonesAdd(
@@ -179,6 +201,6 @@ public class TestExtendedTable extends WithSpark {
 
   @Test(expected = NoSuchTableException.class)
   public void testAppendFileWithTombstonesNoSuchTable() {
-    TABLES.loadWithTombstoneExtension("noSuchTablePath");
+    tables.loadWithTombstoneExtension("noSuchTablePath");
   }
 }

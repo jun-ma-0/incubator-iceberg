@@ -31,8 +31,8 @@ public class CherryPickFromTombstoneSnapshot extends CherryPickFromSnapshot {
   @Override
   protected void addSummaryProperties() {
     super.addSummaryProperties();
-    Optional.ofNullable(base
-        .snapshot(cherryPickSnapshotId)
+    Optional.ofNullable(getBase()
+        .snapshot(getCherryPickSnapshotId())
         .summary()
         .get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY))
         .map(f -> set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, f));

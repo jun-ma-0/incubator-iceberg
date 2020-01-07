@@ -39,14 +39,18 @@ import org.apache.iceberg.exceptions.ValidationException;
  *
  */
 class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> implements CherryPick {
-  protected final TableOperations ops;
-  protected TableMetadata base;
-  protected Long cherryPickSnapshotId = null;
+  private final TableOperations ops;
+  private TableMetadata base;
+  private Long cherryPickSnapshotId = null;
 
   CherryPickFromSnapshot(TableOperations ops) {
     super(ops);
     this.ops = ops;
     this.base = ops.refresh();
+  }
+
+  private static String stagedWapId(Snapshot snapshot) {
+    return snapshot.summary() != null ? snapshot.summary().getOrDefault("wap.id", null) : null;
   }
 
   @Override
@@ -56,7 +60,6 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
 
   /**
    * We only cherry pick for appends right now
-   * @return
    */
   @Override
   protected String operation() {
@@ -79,12 +82,13 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
    * This does not result in a permanent update.
    *
    * @return the uncommitted changes that would be committed by calling {@link #commit()}
-   * @throws ValidationException      If the pending changes cannot be applied to the current metadata
+   * @throws ValidationException If the pending changes cannot be applied to the current metadata
    * @throws IllegalArgumentException If the pending changes are conflicting or invalid
    */
   @Override
   public Snapshot apply() {
-    ValidationException.check(cherryPickSnapshotId != null,
+    ValidationException.check(
+        cherryPickSnapshotId != null,
         "Cannot cherry pick unknown version: call cherrypick");
 
     Snapshot cherryPickSnapshot = base.snapshot(cherryPickSnapshotId);
@@ -117,10 +121,6 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
     set(SnapshotSummary.PUBLISHED_WAP_ID_PROP, stagedWapId(base.snapshot(cherryPickSnapshotId)));
   }
 
-  private static String stagedWapId(Snapshot snapshot) {
-    return snapshot.summary() != null ? snapshot.summary().getOrDefault("wap.id", null) : null;
-  }
-
   /**
    * Apply the pending changes and commit.
    * <p>
@@ -128,7 +128,7 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
    * <p>
    * Once the commit is successful, the updated table will be refreshed.
    *
-   * @throws ValidationException   If the update cannot be applied to the current table metadata.
+   * @throws ValidationException If the update cannot be applied to the current table metadata.
    * @throws CommitFailedException If the update cannot be committed due to conflicts.
    */
   @Override
@@ -137,5 +137,25 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
     Snapshot outputSnapshot = apply();
     base = ops.refresh();
     ops.commit(base, base.cherrypickFrom(outputSnapshot));
+  }
+
+  public TableOperations getOps() {
+    return ops;
+  }
+
+  public TableMetadata getBase() {
+    return base;
+  }
+
+  public void setBase(TableMetadata base) {
+    this.base = base;
+  }
+
+  public Long getCherryPickSnapshotId() {
+    return cherryPickSnapshotId;
+  }
+
+  public void setCherryPickSnapshotId(Long cherryPickSnapshotId) {
+    this.cherryPickSnapshotId = cherryPickSnapshotId;
   }
 }

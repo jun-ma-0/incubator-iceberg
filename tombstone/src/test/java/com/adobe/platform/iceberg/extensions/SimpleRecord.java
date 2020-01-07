@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package com.adobe.platform.iceberg.extensions;
 
 import java.sql.Timestamp;
@@ -9,14 +28,14 @@ import org.apache.iceberg.types.Types;
 import static org.apache.iceberg.types.Types.NestedField.optional;
 
 public class SimpleRecord {
-  public transient final static Schema SCHEMA = new Schema(
+  public static final transient Schema schema = new Schema(
       optional(11, "id", Types.IntegerType.get()),
       optional(22, "timestamp", Types.TimestampType.withZone()),
       optional(33, "batch", Types.StringType.get()),
       optional(44, "data", Types.StringType.get()));
 
-  public transient final static PartitionSpec SPEC =
-      PartitionSpec.builderFor(SCHEMA)
+  public static final transient PartitionSpec spec =
+      PartitionSpec.builderFor(schema)
           .day("timestamp", "_ACP_DATE")
           .identity("batch")
           .build();

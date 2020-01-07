@@ -125,6 +125,7 @@ class Writer implements DataSourceWriter {
     return FileFormat.valueOf(formatString.toUpperCase(Locale.ENGLISH));
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
   private Map<String, String> getTags(DataSourceOptions options) {
     Map<String, String> tags = new HashMap<>();
     options.asMap().keySet().stream()
@@ -173,7 +174,7 @@ class Writer implements DataSourceWriter {
       operation.stageOnly();
     }
 
-    if(tags != null && !tags.isEmpty()) {
+    if (tags != null && !tags.isEmpty()) {
       tags.forEach((k, v) -> operation.set(k, v));
     }
 

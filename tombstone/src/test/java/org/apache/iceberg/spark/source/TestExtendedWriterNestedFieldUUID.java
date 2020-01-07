@@ -26,6 +26,7 @@ import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.spark.SparkSchemaUtil;
@@ -40,7 +41,7 @@ import org.apache.spark.sql.types.StructType;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestExtendedWriterNestedField extends WithSpark {
+public class TestExtendedWriterNestedFieldUUID extends WithSpark {
 
   private static final List<StructField> SYSTEM_STRUCT = Arrays.asList(
       new StructField("acp_sourceBatchId", DataTypes.StringType, false, Metadata.empty()),
@@ -73,20 +74,22 @@ public class TestExtendedWriterNestedField extends WithSpark {
 
   @Test
   public void testWriterAppendFilesAndAppendTombstonesOnStructField() {
-    Timestamp ts = Timestamp.valueOf("2019-10-10 10:10:10.10");
-
+    Timestamp now = Timestamp.valueOf("2019-10-10 10:10:10.10");
+    Map<Object, Object> emptyMap = Collections.emptyMap();
     List<Row> rows = Lists.newArrayList(
-        RowFactory.create(101, ts, "A", RowFactory.create("X", Collections.emptyMap())),
-        RowFactory.create(102, ts, "A", RowFactory.create("X", Collections.emptyMap())),
-        RowFactory.create(103, ts, "A", RowFactory.create("X", Collections.emptyMap())),
-        RowFactory.create(104, ts, "A", RowFactory.create("X", Collections.emptyMap())),
-        RowFactory.create(105, ts, "A", RowFactory.create("X", Collections.emptyMap())),
-        RowFactory.create(201, ts, "A", RowFactory.create("Y", Collections.emptyMap())),
-        RowFactory.create(202, ts, "A", RowFactory.create("Y", Collections.emptyMap())),
-        RowFactory.create(203, ts, "A", RowFactory.create("Y", Collections.emptyMap())),
-        RowFactory.create(204, ts, "A", RowFactory.create("Y", Collections.emptyMap())),
-        RowFactory.create(205, ts, "A", RowFactory.create("Y", Collections.emptyMap())),
-        RowFactory.create(301, ts, "A", RowFactory.create("Z", Collections.emptyMap())));
+        RowFactory.create(101, now, "A", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(102, now, "A", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(103, now, "A", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(104, now, "A", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(105, now, "A", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(201, now, "A", RowFactory.create("195e44d7-2583-41f9-a662-0cfe014f8bf8", emptyMap)),
+        RowFactory.create(202, now, "B", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)),
+        RowFactory.create(203, now, "B", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)),
+        RowFactory.create(203, now, "B", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)),
+        RowFactory.create(203, now, "B", RowFactory.create("195e44d7-2583-41f9-a662-0cfe014f8bf8", emptyMap)),
+        RowFactory.create(204, now, "C", RowFactory.create("c40cfc85-142f-45b9-b020-13b0efc1be16", emptyMap)),
+        RowFactory.create(205, now, "C", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)),
+        RowFactory.create(301, now, "C", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)));
 
     spark.createDataFrame(rows, SCHEMA)
         .select("*")
@@ -96,8 +99,8 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .save(getTableLocation());
 
     List<Row> thirdBatchRows = Lists.newArrayList(
-        RowFactory.create(301, ts, "B", RowFactory.create("Z", Collections.emptyMap())),
-        RowFactory.create(302, ts, "B", RowFactory.create("Z", Collections.emptyMap())));
+        RowFactory.create(301, now, "B", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)),
+        RowFactory.create(302, now, "B", RowFactory.create("3f46818b-280f-48d1-bb99-4f7598e56658", emptyMap)));
 
     // Write the data and add new tombstones for X and Y
     spark.createDataFrame(thirdBatchRows, SCHEMA)
@@ -105,7 +108,9 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .write()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.col", "_acp_system_metadata.acp_sourceBatchId")
-        .option("iceberg.extension.tombstone.values", "X,Y")
+        .option(
+            "iceberg.extension.tombstone.values",
+            "c40cfc85-142f-45b9-b020-13b0efc1be16,195e44d7-2583-41f9-a662-0cfe014f8bf8")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -115,6 +120,6 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .load(getTableLocation());
     load.show(false);
 
-    Assert.assertEquals("Result rows should only match Z", 3, load.count());
+    Assert.assertEquals("Result rows should only match 3f46818b-280f-48d1-bb99-4f7598e56658", 7, load.count());
   }
 }

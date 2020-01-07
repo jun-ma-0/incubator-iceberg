@@ -62,27 +62,12 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   private static final Logger LOG = LoggerFactory.getLogger(MergingSnapshotProducer.class);
 
   private static final Joiner COMMA = Joiner.on(",");
-
-  protected static class DeleteException extends ValidationException {
-    private final String partition;
-
-    private DeleteException(String partition) {
-      super("Operation would delete existing data");
-      this.partition = partition;
-    }
-
-    public String partition() {
-      return partition;
-    }
-  }
-
   private final TableOperations ops;
   private final PartitionSpec spec;
   private final long manifestTargetSizeBytes;
   private final int minManifestsCountToMerge;
   private final SnapshotSummary.Builder summaryBuilder = SnapshotSummary.builder();
   private final boolean mergeEnabled;
-
   // update data
   private final AtomicInteger manifestCount = new AtomicInteger(0);
   private final List<DataFile> newFiles = Lists.newArrayList();
@@ -91,25 +76,20 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   private final Set<CharSequenceWrapper> deletePaths = Sets.newHashSet();
   private final Set<StructLikeWrapper> deleteFilePartitions = Sets.newHashSet();
   private final Set<StructLikeWrapper> dropPartitions = Sets.newHashSet();
+  // cache merge results to reuse when retrying
+  private final Map<List<ManifestFile>, ManifestFile> mergeManifests = Maps.newConcurrentMap();
+  // cache filtered manifests to avoid extra work when commits fail.
+  private final Map<ManifestFile, ManifestFile> filteredManifests = Maps.newConcurrentMap();
+  // tracking where files were deleted to validate retries quickly
+  private final Map<ManifestFile, Iterable<DataFile>> filteredManifestToDeletedFiles =
+      Maps.newConcurrentMap();
   private Expression deleteExpression = Expressions.alwaysFalse();
   private boolean hasPathOnlyDeletes = false;
   private boolean failAnyDelete = false;
   private boolean failMissingDeletePaths = false;
-
   // cache the new manifest once it is written
   private ManifestFile cachedNewManifest = null;
   private boolean hasNewFiles = false;
-
-  // cache merge results to reuse when retrying
-  private final Map<List<ManifestFile>, ManifestFile> mergeManifests = Maps.newConcurrentMap();
-
-  // cache filtered manifests to avoid extra work when commits fail.
-  private final Map<ManifestFile, ManifestFile> filteredManifests = Maps.newConcurrentMap();
-
-  // tracking where files were deleted to validate retries quickly
-  private final Map<ManifestFile, Iterable<DataFile>> filteredManifestToDeletedFiles =
-      Maps.newConcurrentMap();
-
   private boolean filterUpdated = false; // used to clear caches of filtered and merged manifests
 
   MergingSnapshotProducer(TableOperations ops) {
@@ -277,20 +257,25 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
         Iterables.addAll(manifests, unmergedManifests);
       }
 
-      ValidationException.check(!failMissingDeletePaths || deletedFiles.containsAll(deletePaths),
+      ValidationException.check(
+          !failMissingDeletePaths || deletedFiles.containsAll(deletePaths),
           "Missing required files to delete: %s",
-          COMMA.join(Iterables.transform(Iterables.filter(deletePaths,
-              path -> !deletedFiles.contains(path)),
+          COMMA.join(Iterables.transform(
+              Iterables.filter(
+                  deletePaths,
+                  path -> !deletedFiles.contains(path)),
               CharSequenceWrapper::get)));
 
       return manifests;
-
     } catch (IOException e) {
       throw new RuntimeIOException(e, "Failed to create snapshot manifest list");
     }
   }
 
-  private ManifestFile[] filterManifests(StrictMetricsEvaluator metricsEvaluator, List<ManifestFile> manifests, Boolean skipInclusiveEvaluation)
+  private ManifestFile[] filterManifests(
+      StrictMetricsEvaluator metricsEvaluator,
+      List<ManifestFile> manifests,
+      Boolean skipInclusiveEvaluation)
       throws IOException {
     ManifestFile[] filtered = new ManifestFile[manifests.size()];
     // open all of the manifest files in parallel, use index to avoid reordering
@@ -430,8 +415,9 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   /**
    * @return a ManifestReader that is a filtered version of the input manifest.
    */
-  private ManifestFile filterManifest(StrictMetricsEvaluator metricsEvaluator,
-                                      ManifestFile manifest, Boolean skipInclusiveEvaluation)
+  private ManifestFile filterManifest(
+      StrictMetricsEvaluator metricsEvaluator,
+      ManifestFile manifest, Boolean skipInclusiveEvaluation)
       throws IOException {
     ManifestFile cached = filteredManifests.get(manifest);
     if (cached != null) {
@@ -480,7 +466,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       boolean fileDelete = deletePaths.contains(pathWrapper.set(file.path())) ||
           dropPartitions.contains(partitionWrapper.set(file.partition()));
       if (fileDelete || inclusive.eval(file.partition())) {
-        if(!skipInclusiveEvaluation) {
+        if (!skipInclusiveEvaluation) {
           ValidationException.check(
               fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
               "Cannot delete file where some, but not all, rows match filter %s: %s",
@@ -499,7 +485,8 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
 
   private ManifestFile filterManifestWithDeletedFiles(
       StrictMetricsEvaluator metricsEvaluator, ManifestFile manifest, ManifestReader reader,
-      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation) throws IOException {
+      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation)
+      throws IOException {
     Evaluator inclusive = extractInclusiveDeleteExpression(reader);
     Evaluator strict = extractStrictDeleteExpression(reader);
     // when this point is reached, there is at least one file that will be deleted in the
@@ -515,7 +502,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
             dropPartitions.contains(partitionWrapper.set(file.partition()));
         if (entry.status() != Status.DELETED) {
           if (fileDelete || inclusive.eval(file.partition())) {
-            if(!skipInclusiveEvaluation) {
+            if (!skipInclusiveEvaluation) {
               ValidationException.check(
                   fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
                   "Cannot delete file where some, but not all, rows match filter %s: %s",
@@ -535,7 +522,6 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
               deletedFiles.add(entry.file().copyWithoutStats());
             }
             deletedPaths.add(wrapper);
-
           } else {
             writer.existing(entry);
           }
@@ -677,5 +663,18 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     }
 
     return cachedNewManifest;
+  }
+
+  protected static class DeleteException extends ValidationException {
+    private final String partition;
+
+    private DeleteException(String partition) {
+      super("Operation would delete existing data");
+      this.partition = partition;
+    }
+
+    public String partition() {
+      return partition;
+    }
   }
 }

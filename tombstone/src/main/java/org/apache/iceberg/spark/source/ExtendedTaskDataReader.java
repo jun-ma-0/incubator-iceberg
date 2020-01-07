@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneRows;
@@ -75,7 +94,8 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
   private Closeable currentCloseable = null;
   private InternalRow current = null;
 
-  ExtendedTaskDataReader(CombinedScanTask task, Schema tableSchema, Schema expectedSchema,
+  ExtendedTaskDataReader(
+      CombinedScanTask task, Schema tableSchema, Schema expectedSchema,
       FileIO fileIo,
       EncryptionManager encryptionManager, boolean caseSensitive,
       String tombstoneFieldName,
@@ -86,7 +106,8 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
     this.expectedSchema = expectedSchema;
     this.tombstoneFieldName = tombstoneFieldName;
     this.tombstones = tombstones;
-    Iterable<InputFile> decryptedFiles = encryptionManager.decrypt(Iterables.transform(task.files(),
+    Iterable<InputFile> decryptedFiles = encryptionManager.decrypt(Iterables.transform(
+        task.files(),
         fileScanTask ->
             EncryptedFiles.encryptedInput(
                 this.fileIo.newInputFile(fileScanTask.file().path().toString()),
@@ -128,11 +149,9 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
       if (currentIterator.hasNext()) {
         this.current = currentIterator.next();
         return true;
-
       } else if (tasks.hasNext()) {
         this.currentCloseable.close();
         this.currentIterator = open(tasks.next());
-
       } else {
         return false;
       }
@@ -186,24 +205,22 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
       // create joined rows and project from the joined schema to the final schema
       iterSchema = TypeUtil.join(readSchema, partitionSchema);
       iter = Iterators.transform(open(task, readSchema), joined::withLeft);
-
     } else if (hasExtraFilterColumns) {
       // add projection to the final schema
       iterSchema = requiredSchema;
       iter = open(task, requiredSchema);
-
     } else {
       // return the base iterator
       iterSchema = finalSchema;
       iter = open(task, finalSchema);
-
     }
 
     TombstoneRows tombstoneRows = new TombstoneRows(tombstoneFieldName, tombstones);
     Iterator<InternalRow> filteredTombstonesIterator = tombstoneRows.filter(iterSchema, iter);
 
     // TODO: remove the projection by reporting the iterator's schema back to Spark
-    return Iterators.transform(filteredTombstonesIterator,
+    return Iterators.transform(
+        filteredTombstonesIterator,
         APPLY_PROJECTION.bind(projection(finalSchema, iterSchema))::invoke);
   }
 
@@ -211,7 +228,6 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
     CloseableIterable<InternalRow> iter;
     if (task.isDataTask()) {
       iter = newDataIterable(task.asDataTask(), readSchema);
-
     } else {
       InputFile location = inputFiles.get(task.file().path().toString());
       Preconditions.checkNotNull(location, "Could not find InputFile associated with FileScanTask");
@@ -240,7 +256,8 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
     return iter.iterator();
   }
 
-  private CloseableIterable<InternalRow> newAvroIterable(InputFile location,
+  private CloseableIterable<InternalRow> newAvroIterable(
+      InputFile location,
       FileScanTask task,
       Schema readSchema) {
     return Avro.read(location)
@@ -251,7 +268,8 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
         .build();
   }
 
-  private CloseableIterable<InternalRow> newParquetIterable(InputFile location,
+  private CloseableIterable<InternalRow> newParquetIterable(
+      InputFile location,
       FileScanTask task,
       Schema readSchema) {
     return Parquet.read(location)
@@ -263,7 +281,8 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
         .build();
   }
 
-  private CloseableIterable<InternalRow> newOrcIterable(InputFile location,
+  private CloseableIterable<InternalRow> newOrcIterable(
+      InputFile location,
       FileScanTask task,
       Schema readSchema) {
     return ORC.read(location)
@@ -281,7 +300,6 @@ public class ExtendedTaskDataReader implements InputPartitionReader<InternalRow>
     return CloseableIterable.transform(
         asSparkRows, APPLY_PROJECTION.bind(projection(readSchema, tableSchema))::invoke);
   }
-
 
   private static class PartitionRowConverter implements Function<StructLike, InternalRow> {
 

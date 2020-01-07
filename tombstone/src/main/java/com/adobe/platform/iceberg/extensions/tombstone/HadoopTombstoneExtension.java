@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package com.adobe.platform.iceberg.extensions.tombstone;
 
 import com.google.common.collect.Lists;
@@ -45,6 +64,22 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
   }
 
   @Override
+  public OutputFile remove(Snapshot snapshot, Namespace namespace) {
+    List<Tombstone> current = load(snapshot);
+    OutputFile outputFile = newTombstonesFile(ops.current());
+    try {
+      List<Tombstone> removedByNamespace = current.stream()
+          .filter(tombstone -> !tombstone.getNamespace().equalsIgnoreCase(namespace.getId()))
+          .collect(Collectors.toList());
+      new Tombstones(this.conf).write(removedByNamespace, outputFile.location());
+      return outputFile;
+    } catch (IOException | URISyntaxException e) {
+      throw new RuntimeIOException(
+          String.format("Failed to write tombstones to file: %s", outputFile.location()), e);
+    }
+  }
+
+  @Override
   public OutputFile remove(Snapshot snapshot, List<Entry> entries, Namespace namespace) {
     List<Tombstone> current = load(snapshot);
     OutputFile outputFile = newTombstonesFile(ops.current());
@@ -59,7 +94,8 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
   }
 
   @Override
-  public OutputFile append(Snapshot snapshot, List<Entry> entries, Namespace namespace,
+  public OutputFile append(
+      Snapshot snapshot, List<Entry> entries, Namespace namespace,
       Map<String, String> props, long newSnapshotId) {
     OutputFile outputFile = newTombstonesFile(ops.current());
     List<Tombstone> current = load(snapshot);
@@ -98,22 +134,6 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
         }).collect(Collectors.toList());
   }
 
-  @Override
-  public OutputFile remove(Snapshot snapshot, Namespace namespace) {
-    List<Tombstone> current = load(snapshot);
-    OutputFile outputFile = newTombstonesFile(ops.current());
-    try {
-      List<Tombstone> removedByNamespace = current.stream()
-          .filter(tombstone -> !tombstone.getNamespace().equalsIgnoreCase(namespace.getId()))
-          .collect(Collectors.toList());
-      new Tombstones(this.conf).write(removedByNamespace, outputFile.location());
-      return outputFile;
-    } catch (IOException | URISyntaxException e) {
-      throw new RuntimeIOException(
-          String.format("Failed to write tombstones to file: %s", outputFile.location()), e);
-    }
-  }
-
   private List<Tombstone> load(Snapshot snapshot) {
     if (snapshot == null || snapshot.summary() == null) {
       LOG.debug("No available tombstones, expected non-null snapshot value");
@@ -121,14 +141,16 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
     }
     String file = snapshot.summary().getOrDefault(SNAPSHOT_TOMBSTONE_FILE_PROPERTY, "");
     if (file.isEmpty()) {
-      LOG.debug("No available tombstones, invalid snapshot summary property: {}",
+      LOG.debug(
+          "No available tombstones, invalid snapshot summary property: {}",
           SNAPSHOT_TOMBSTONE_FILE_PROPERTY);
       return Lists.newArrayList();
     }
     try {
       return new Tombstones(conf).load(file);
     } catch (IOException e) {
-      throw new RuntimeIOException(String.format("Failed to read tombstones from file: %s", file),
+      throw new RuntimeIOException(
+          String.format("Failed to read tombstones from file: %s", file),
           e);
     }
   }

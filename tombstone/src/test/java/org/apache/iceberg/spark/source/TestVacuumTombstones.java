@@ -1,18 +1,33 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.ExtendedTables;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
 import com.adobe.platform.iceberg.extensions.WithSpark;
-import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import java.util.stream.Collectors;
-import org.apache.iceberg.types.Types.NestedField;
-import org.apache.parquet.Strings;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
@@ -45,10 +60,9 @@ public class TestVacuumTombstones extends WithSpark {
       new SimpleRecord(18, now, "C", "b"),
       new SimpleRecord(18, now, "C", "c"));
 
-
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {
-    tables.create(SimpleRecord.SCHEMA, SimpleRecord.SPEC, tableLocation,
+    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation,
         ImmutableMap.of("extension.skip.inclusive.evaluation", "true")
     );
   }
@@ -64,7 +78,7 @@ public class TestVacuumTombstones extends WithSpark {
         .mode("append")
         .save(getTableLocation());
 
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     long readSnapshotId = table.currentSnapshot().snapshotId();
 
     // Read all rows by applying tombstone filtering
@@ -100,7 +114,7 @@ public class TestVacuumTombstones extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    ExtendedTable table = TABLES.loadWithTombstoneExtension(getTableLocation());
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     long snapshotId = table.currentSnapshot().snapshotId();
 
     spark.read()

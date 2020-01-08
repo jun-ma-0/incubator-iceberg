@@ -48,7 +48,7 @@ public class TestWapWorkflowOverTombstone extends WithSpark {
         Lists.newArrayList(() -> "4", () -> "5", () -> "6"),
         ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
 
-    second.set("wap.id", "123")
+    second.set(SnapshotSummary.STAGED_WAP_ID_PROP, "123")
         .stageOnly()
         .commit();
 
@@ -69,7 +69,7 @@ public class TestWapWorkflowOverTombstone extends WithSpark {
         batchField,
         Lists.newArrayList(() -> "7", () -> "8", () -> "9"),
         ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
-    third.set("wap.id", "456")
+    third.set(SnapshotSummary.STAGED_WAP_ID_PROP, "456")
         .stageOnly()
         .commit();
 

@@ -345,17 +345,34 @@ public class TableMetadata {
   }
 
   public TableMetadata replaceCurrentSnapshot(Snapshot snapshot) {
-    List<Snapshot> newSnapshots = ImmutableList.<Snapshot>builder()
-        .addAll(snapshots)
-        .add(snapshot)
-        .build();
-    List<HistoryEntry> newSnapshotLog = ImmutableList.<HistoryEntry>builder()
-        .addAll(snapshotLog)
-        .add(new SnapshotLogEntry(snapshot.timestampMillis(), snapshot.snapshotId()))
-        .build();
-    return new TableMetadata(ops, null, uuid, location,
-        snapshot.timestampMillis(), lastColumnId, schema, defaultSpecId, specs, properties,
-        snapshot.snapshotId(), newSnapshots, newSnapshotLog);
+    // there can be operations (viz. rollback, cherrypick) where an existing snapshot could be replacing current
+    if (snapshotsById.containsKey(snapshot.snapshotId())) {
+      long nowMillis = System.currentTimeMillis();
+      List<HistoryEntry> newSnapshotLog = ImmutableList.<HistoryEntry>builder()
+          .addAll(snapshotLog)
+          .add(new SnapshotLogEntry(nowMillis, snapshot.snapshotId()))
+          .build();
+
+      return new TableMetadata(ops, null, uuid, location,
+          nowMillis, lastColumnId, schema, defaultSpecId, specs, properties,
+          snapshot.snapshotId(), snapshots, newSnapshotLog);
+
+    } else {
+
+      List<Snapshot> newSnapshots = ImmutableList.<Snapshot>builder()
+          .addAll(snapshots)
+          .add(snapshot)
+          .build();
+      List<HistoryEntry> newSnapshotLog = ImmutableList.<HistoryEntry>builder()
+          .addAll(snapshotLog)
+          .add(new SnapshotLogEntry(snapshot.timestampMillis(),
+              snapshot.snapshotId()))
+          .build();
+
+      return new TableMetadata(ops, null, uuid,  location,
+          snapshot.timestampMillis(), lastColumnId, schema, defaultSpecId, specs, properties,
+          snapshot.snapshotId(), newSnapshots, newSnapshotLog);
+    }
   }
 
   public TableMetadata removeSnapshotsIf(Predicate<Snapshot> removeIf) {

@@ -20,7 +20,7 @@
 package org.apache.iceberg;
 
 import com.google.common.collect.Iterables;
-import org.apache.iceberg.exceptions.ValidationException;
+import org.apache.iceberg.exceptions.DuplicateWAPCommitException;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -43,7 +43,7 @@ public class TestWapWorkflow extends TableTestBase {
 
     table.newAppend()
         .appendFile(FILE_B)
-        .set("wap.id", "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -52,7 +52,7 @@ public class TestWapWorkflow extends TableTestBase {
 
     Assert.assertEquals("Metadata should have both snapshots", 2, base.snapshots().size());
     Assert.assertEquals("Snapshot should have wap id in summary", "123456789",
-        wapSnapshot.summary().get("wap.id"));
+        wapSnapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Current snapshot should be first commit's snapshot",
         firstSnapshotId, base.currentSnapshot().snapshotId());
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 1,
@@ -84,7 +84,7 @@ public class TestWapWorkflow extends TableTestBase {
     // first WAP commit
     table.newAppend()
         .appendFile(FILE_B)
-        .set("wap.id", "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -94,7 +94,7 @@ public class TestWapWorkflow extends TableTestBase {
 
     Assert.assertEquals("Should have both snapshots", 2, base.snapshots().size());
     Assert.assertEquals("Should have first wap id in summary", "123456789",
-        wapSnapshot.summary().get("wap.id"));
+        wapSnapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Current snapshot should be first commit's snapshot",
         firstSnapshotId, base.currentSnapshot().snapshotId());
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 1,
@@ -130,14 +130,14 @@ public class TestWapWorkflow extends TableTestBase {
     // first WAP commit
     table.newAppend()
         .appendFile(FILE_B)
-        .set("wap.id", "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
         .commit();
 
     // second WAP commit
     table.newAppend()
         .appendFile(FILE_C)
-        .set("wap.id", "987654321")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "987654321")
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -148,9 +148,9 @@ public class TestWapWorkflow extends TableTestBase {
 
     Assert.assertEquals("Should have three snapshots", 3, base.snapshots().size());
     Assert.assertEquals("Should have first wap id in summary", "123456789",
-        wap1Snapshot.summary().get("wap.id"));
+        wap1Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Should have second wap id in summary", "987654321",
-        wap2Snapshot.summary().get("wap.id"));
+        wap2Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Current snapshot should be first commit's snapshot",
         firstSnapshotId, base.currentSnapshot().snapshotId());
     Assert.assertEquals("Parent snapshot id should be same for first WAP snapshot",
@@ -190,7 +190,8 @@ public class TestWapWorkflow extends TableTestBase {
     //   as a result of the cherry-pick operation
     Assert.assertEquals("Current snapshot should be set to one after wap snapshot",
         parentSnapshot.snapshotId() + 1, base.currentSnapshot().snapshotId());
-    Assert.assertEquals("Should contain manifests for both files", 3, base.currentSnapshot().manifests().size());
+    Assert.assertEquals("Should contain manifests for both files", 3,
+        base.currentSnapshot().manifests().size());
     Assert.assertEquals("Should contain append from last commit", 1,
         Iterables.size(base.currentSnapshot().addedFiles()));
     Assert.assertEquals("Parent snapshot id should change to latest snapshot before commit",
@@ -198,6 +199,75 @@ public class TestWapWorkflow extends TableTestBase {
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 3,
         base.snapshotLog().size());
   }
+
+
+  @Test
+  public void testWithCherryPickingWithCommitRetry() {
+
+    table.newAppend()
+        .appendFile(FILE_A)
+        .commit();
+    TableMetadata base = readMetadata();
+    // load current snapshot
+    Snapshot parentSnapshot = base.currentSnapshot();
+    long firstSnapshotId = parentSnapshot.snapshotId();
+
+    // first WAP commit
+    table.newAppend()
+        .appendFile(FILE_B)
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
+        .stageOnly()
+        .commit();
+
+    // // second WAP commit
+    // table.newAppend()
+    //     .appendFile(FILE_C)
+    //     .set(SnapshotSummary.STAGED_WAP_ID_PROP, "987654321")
+    //     .stageOnly()
+    //     .commit();
+    base = readMetadata();
+
+    // pick the snapshot that's staged but not committed
+    Snapshot wap1Snapshot = base.snapshots().get(1);
+    // Snapshot wap2Snapshot = base.snapshots().get(2);
+
+    Assert.assertEquals("Should have three snapshots", 2, base.snapshots().size());
+    Assert.assertEquals("Should have first wap id in summary", "123456789",
+        wap1Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
+    // Assert.assertEquals("Should have second wap id in summary", "987654321",
+    //     wap2Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
+    Assert.assertEquals("Current snapshot should be first commit's snapshot",
+        firstSnapshotId, base.currentSnapshot().snapshotId());
+    Assert.assertEquals("Parent snapshot id should be same for first WAP snapshot",
+        firstSnapshotId, wap1Snapshot.parentId().longValue());
+    // Assert.assertEquals("Parent snapshot id should be same for second WAP snapshot",
+    //     firstSnapshotId, wap2Snapshot.parentId().longValue());
+    Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 1,
+        base.snapshotLog().size());
+
+    // load current snapshot
+    base = readMetadata();
+    parentSnapshot = base.currentSnapshot();
+    // cherry-pick first snapshot
+    table.ops().failCommits(3);
+    table.cherrypick().cherrypick(wap1Snapshot.snapshotId()).commit();
+    base = readMetadata();
+
+    // check if the effective current snapshot is set to the new snapshot created
+    //   as a result of the cherry-pick operation
+    Assert.assertEquals("Current snapshot should be set to one after wap snapshot",
+        parentSnapshot.snapshotId() + 1 /* one staged snapshot */ + 1,
+        base.currentSnapshot().snapshotId());
+    Assert.assertEquals("Should contain manifests for both files", 2,
+        base.currentSnapshot().manifests().size());
+    Assert.assertEquals("Should contain append from last commit", 1,
+        Iterables.size(base.currentSnapshot().addedFiles()));
+    Assert.assertEquals("Parent snapshot id should change to latest snapshot before commit",
+        parentSnapshot.snapshotId(), base.currentSnapshot().parentId().longValue());
+    Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 2,
+        base.snapshotLog().size());
+  }
+
 
   @Test
   public void testWithCommitsBetweenCherryPicking() {
@@ -212,14 +282,14 @@ public class TestWapWorkflow extends TableTestBase {
     // first WAP commit
     table.newAppend()
         .appendFile(FILE_B)
-        .set("wap.id", "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
         .commit();
 
     // second WAP commit
     table.newAppend()
         .appendFile(FILE_C)
-        .set("wap.id", "987654321")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "987654321")
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -230,9 +300,9 @@ public class TestWapWorkflow extends TableTestBase {
 
     Assert.assertEquals("Should have three snapshots", 3, base.snapshots().size());
     Assert.assertEquals("Should have first wap id in summary", "123456789",
-        wap1Snapshot.summary().get("wap.id"));
+        wap1Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Should have second wap id in summary", "987654321",
-        wap2Snapshot.summary().get("wap.id"));
+        wap2Snapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Current snapshot should be first commit's snapshot",
         firstSnapshotId, base.currentSnapshot().snapshotId());
     Assert.assertEquals("Parent snapshot id should be same for first WAP snapshot",
@@ -312,7 +382,7 @@ public class TestWapWorkflow extends TableTestBase {
     // first WAP commit
     table.newAppend()
         .appendFile(FILE_B)
-        .set("wap.id", "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -322,7 +392,7 @@ public class TestWapWorkflow extends TableTestBase {
 
     Assert.assertEquals("Should have both snapshots", 2, base.snapshots().size());
     Assert.assertEquals("Should have first wap id in summary", "123456789",
-        wapSnapshot.summary().get("wap.id"));
+        wapSnapshot.summary().get(SnapshotSummary.STAGED_WAP_ID_PROP));
     Assert.assertEquals("Current snapshot should be first commit's snapshot",
         firstSnapshotId, base.currentSnapshot().snapshotId());
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 1,
@@ -343,7 +413,7 @@ public class TestWapWorkflow extends TableTestBase {
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 2,
         base.snapshotLog().size());
 
-    AssertHelpers.assertThrows("should throw exception", ValidationException.class,
+    AssertHelpers.assertThrows("should throw exception", DuplicateWAPCommitException.class,
         String.format("Duplicate request to cherry pick wap id that was published already: %s", 12345678), () -> {
           // duplicate cherry-pick snapshot
           table.cherrypick().cherrypick(wapSnapshot.snapshotId()).commit();

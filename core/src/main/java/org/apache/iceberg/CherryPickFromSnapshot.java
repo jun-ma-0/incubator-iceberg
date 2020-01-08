@@ -20,7 +20,9 @@
 package org.apache.iceberg;
 
 import com.google.common.base.Preconditions;
-import org.apache.iceberg.exceptions.CommitFailedException;
+import java.util.HashSet;
+import java.util.Set;
+import org.apache.iceberg.exceptions.DuplicateWAPCommitException;
 import org.apache.iceberg.exceptions.ValidationException;
 
 /**
@@ -42,15 +44,18 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
   private final TableOperations ops;
   private TableMetadata base;
   private Long cherryPickSnapshotId = null;
+  private Set<Long> snapshotsAlreadyCherrypicked;
 
   CherryPickFromSnapshot(TableOperations ops) {
     super(ops);
     this.ops = ops;
-    this.base = ops.refresh();
+    this.base = ops.current();
+    snapshotsAlreadyCherrypicked = new HashSet<>();
   }
 
   private static String stagedWapId(Snapshot snapshot) {
-    return snapshot.summary() != null ? snapshot.summary().getOrDefault("wap.id", null) : null;
+    return snapshot.summary() != null ?
+        snapshot.summary().getOrDefault(SnapshotSummary.STAGED_WAP_ID_PROP, null) : null;
   }
 
   @Override
@@ -93,8 +98,9 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
 
     Snapshot cherryPickSnapshot = base.snapshot(cherryPickSnapshotId);
     String wapId = stagedWapId(cherryPickSnapshot);
-    ValidationException.check(!base.isWapIdPublished(wapId),
-        "Duplicate request to cherry pick wap id that was published already: %s", wapId);
+    if (base.isWapIdPublished(wapId)) {
+      throw new DuplicateWAPCommitException(wapId);
+    }
 
     // only append operations are currently supported
     if (!cherryPickSnapshot.operation().equals(DataOperations.APPEND)) {
@@ -106,37 +112,19 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
     //    ignore those files or reject incoming snapshot entirely?
     //  - Check if there are overwrites, ignore those files or reject incoming snapshot entirely?
 
-    for (DataFile addedFile : cherryPickSnapshot.addedFiles()) {
-      add(addedFile);
+    // this is to handle retries on commit failure
+    if (!snapshotsAlreadyCherrypicked.contains(cherryPickSnapshotId)) {
+      for (DataFile addedFile : cherryPickSnapshot.addedFiles()) {
+        add(addedFile);
+      }
+      addSummaryProperties();
+      snapshotsAlreadyCherrypicked.add(cherryPickSnapshotId);
     }
-    addSummaryProperties();
-    Snapshot outputSnapshot = super.apply();
-    base = ops.refresh();
-    TableMetadata updated = base.addStagedSnapshot(outputSnapshot);
-    ops.commit(base, updated);
-    return outputSnapshot;
+    return super.apply();
   }
 
   protected void addSummaryProperties() {
     set(SnapshotSummary.PUBLISHED_WAP_ID_PROP, stagedWapId(base.snapshot(cherryPickSnapshotId)));
-  }
-
-  /**
-   * Apply the pending changes and commit.
-   * <p>
-   * Changes are committed by calling the underlying table's commit method.
-   * <p>
-   * Once the commit is successful, the updated table will be refreshed.
-   *
-   * @throws ValidationException If the update cannot be applied to the current table metadata.
-   * @throws CommitFailedException If the update cannot be committed due to conflicts.
-   */
-  @Override
-  public void commit() {
-    // Todo: Need to add retry
-    Snapshot outputSnapshot = apply();
-    base = ops.refresh();
-    ops.commit(base, base.cherrypickFrom(outputSnapshot));
   }
 
   public TableOperations getOps() {

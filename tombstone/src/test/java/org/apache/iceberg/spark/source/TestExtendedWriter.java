@@ -22,6 +22,7 @@ package org.apache.iceberg.spark.source;
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
 import com.adobe.platform.iceberg.extensions.WithSpark;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -40,7 +41,8 @@ public class TestExtendedWriter extends WithSpark {
     Types.NestedField batchField = table.schema().findField("batch");
 
     // Tombstone batches with values `A`
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap()).commit();
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1579792561L)
+        .commit();
 
     Timestamp now = Timestamp.from(Instant.now());
     List<SimpleRecord> appendBatchA = Lists.newArrayList(
@@ -56,7 +58,7 @@ public class TestExtendedWriter extends WithSpark {
         .save(getTableLocation());
 
     List<SimpleRecord> actual = spark.read()
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .format("iceberg.adobe")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")

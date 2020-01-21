@@ -20,6 +20,7 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
+import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import java.io.Serializable;
 import java.util.List;
@@ -35,22 +36,24 @@ public interface ExtendedTable extends Table, Serializable {
    * table and commit as a single operation.
    *
    * @param column a column name that must be part of the schema
-   * @param entries tombstone entries that need to be added to the next snapshot
+   * @param entries tombstone entries that need to be added
    * @param properties bag of properties to be projected on all entries
+   * @param evictionTs eviction timestamp for rows matched by the tombstone
    * @return a new {@link ExtendedAppendFiles}
    */
-  ExtendedAppendFiles newAppendWithTombstonesAdd(Types.NestedField column, List<Entry> entries,
-      Map<String, String> properties);
+  ExtendedAppendFiles newAppendWithTombstonesAdd(
+      Types.NestedField column, List<Entry> entries,
+      Map<String, String> properties, long evictionTs);
 
   /**
    * Create a new {@link ExtendedAppendFiles append API} to add files and remove tombstones to this
    * table and commit as a single operation.
    *
    * @param column a column name that must be part of the schema
-   * @param entries tombstone entries that need to be added to the next snapshot
+   * @param entries tombstone entries and associated eviction timestamp that need to be removed
    * @return a new {@link ExtendedAppendFiles}
    */
-  ExtendedAppendFiles newAppendWithTombstonesRemove(Types.NestedField column, List<Entry> entries);
+  ExtendedAppendFiles newAppendWithTombstonesRemove(Types.NestedField column, List<EvictEntry> entries);
 
   /**
    * Retrieves list of tombstones from this table's specific snapshot for the indicated schema
@@ -70,6 +73,14 @@ public interface ExtendedTable extends Table, Serializable {
    * @param readSnapshotId the read snapshot id
    * @return a new {@link Vacuum}
    */
-  Vacuum newVacuumTombstones(Map.Entry<String, Types.NestedField> column, List<Entry> entries,
+  Vacuum newVacuumTombstones(
+      Map.Entry<String, Types.NestedField> column, List<ExtendedEntry> entries,
       Long readSnapshotId);
+
+  /**
+   * Used for testing purposes
+   *
+   * @return instance of {@link ExtendedTableOperations}
+   */
+  ExtendedTableOperations ops();
 }

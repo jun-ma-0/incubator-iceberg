@@ -21,6 +21,7 @@ package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.ExtendedTables;
 import com.adobe.platform.iceberg.extensions.WithSpark;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
 import java.util.Arrays;
@@ -104,8 +105,9 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .select("*")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "_acp_system_metadata.acp_sourceBatchId")
-        .option("iceberg.extension.tombstone.values", "X,Y")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "X,Y")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 

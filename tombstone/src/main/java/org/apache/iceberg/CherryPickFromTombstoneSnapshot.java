@@ -19,22 +19,33 @@
 
 package org.apache.iceberg;
 
+import com.adobe.platform.iceberg.extensions.ExtendedTableOperations;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
+import java.util.List;
 import java.util.Optional;
 
 public class CherryPickFromTombstoneSnapshot extends CherryPickFromSnapshot {
 
-  public CherryPickFromTombstoneSnapshot(TableOperations ops) {
+  private TombstoneExtension tombstoneExtension;
+
+  public CherryPickFromTombstoneSnapshot(ExtendedTableOperations ops, TombstoneExtension tombstoneExtension) {
     super(ops);
+    this.tombstoneExtension = tombstoneExtension;
   }
 
   @Override
-  protected void addSummaryProperties() {
-    super.addSummaryProperties();
-    Optional.ofNullable(getBase()
-        .snapshot(getCherryPickSnapshotId())
-        .summary()
-        .get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY))
-        .map(f -> set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, f));
+  public List<ManifestFile> apply(TableMetadata base) {
+    List<ManifestFile> apply = super.apply(base);
+
+    // Handle tombstones merge
+    Optional<String> outputFilePath = tombstoneExtension.merge(
+        getBase().snapshot(getCherryPickSnapshotId()),
+        getBase().currentSnapshot());
+
+    // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
+    // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
+    outputFilePath.map(path -> set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, path));
+
+    return apply;
   }
 }

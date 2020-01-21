@@ -112,7 +112,8 @@ public class TestConcurrentExtendedTable extends WithSpark implements WithExecut
 
   private Callable<String> addCommit(ExtendedTable table, Types.NestedField field, String tombstone) {
     return () -> {
-      table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> tombstone), Collections.emptyMap()).commit();
+      table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> tombstone), Collections.emptyMap(), 1579792561L)
+          .commit();
       return tombstone;
     };
   }

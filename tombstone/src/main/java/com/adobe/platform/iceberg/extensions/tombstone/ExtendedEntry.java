@@ -40,6 +40,11 @@ public interface ExtendedEntry extends Serializable {
         }
 
         @Override
+        public Long getEvictTimestamp() {
+          return 0L;
+        }
+
+        @Override
         public Map<String, String> getProperties() {
           return Collections.emptyMap();
         }
@@ -53,6 +58,8 @@ public interface ExtendedEntry extends Serializable {
   }
 
   Entry getEntry();
+
+  Long getEvictTimestamp();
 
   Map<String, String> getProperties();
 

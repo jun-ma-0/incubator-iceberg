@@ -29,6 +29,7 @@ public interface TombstoneExtension {
 
   String TOMBSTONE_COLUMN = "iceberg.extension.tombstone.col";
   String TOMBSTONE_COLUMN_VALUES_LIST = "iceberg.extension.tombstone.values";
+  String TOMBSTONE_COLUMN_EVICT_TS = "iceberg.extension.tombstone.evict.epochTime";
   // This links the file we've used to store the provided tombstones to a snapshot summary property for Iceberg
   String SNAPSHOT_TOMBSTONE_FILE_PROPERTY = "iceberg.extension.tombstone.file";
   String TOMBSTONE_VACUUM = "iceberg.extension.tombstone.vacuum";
@@ -54,34 +55,41 @@ public interface TombstoneExtension {
    * @return instance of {@link OutputFile} that has the appropriate tombstone entries
    */
   OutputFile append(
-      Snapshot snapshot, List<Entry> entries, Namespace namespace, Map<String, String> properties,
+      Snapshot snapshot, List<EvictEntry> entries, Namespace namespace, Map<String, String> properties,
       long newSnapshotId);
-
-  /**
-   * Removes all existing tombstones entries by namespace and writes result into new file.
-   *
-   * @param snapshot the table snapshot
-   * @param namespace the namespace used to append the tombstones to
-   * @return instance of {@link OutputFile} that has the appropriate tombstone entries
-   */
-  OutputFile remove(Snapshot snapshot, Namespace namespace);
 
   /**
    * Removes all provided tombstones entries by id and namespace and writes result into new file.
    *
    * @param snapshot the table snapshot
-   * @param entries tombstones references
+   * @param entries tombstone entry with associated eviction timestamps
    * @param namespace the namespace used to append the tombstones to
    * @return instance of {@link OutputFile} that has the appropriate tombstone entries
    */
-  OutputFile remove(Snapshot snapshot, List<Entry> entries, Namespace namespace);
+  OutputFile remove(Snapshot snapshot, List<EvictEntry> entries, Namespace namespace);
 
   /**
    * Copies the referenced tombstone file (where available) from the current snapshot to the new
    * snapshot along with appending the referenced files as an atomic commit operation.
    *
    * @param snapshot the table snapshot
-   * @return an optional {@link OutputFile} that has the appropriate tombstone entries
+   * @return an optional file path for the tombstone file
    */
   Optional<String> copyReference(Snapshot snapshot);
+
+  /**
+   * Merges the variant snapshot tombstones over base snapshot tombstones.
+   * Tombstones are compared based on case-insensitive id, namespace and eviction timestamp.
+   * All tombstones that exist in the variant snapshot but don't exist in the base snapshot will be added to the ones
+   * from the base snapshot and will be written to a new {@link OutputFile} and the method will return its location.
+   *
+   * @param variant source snapshot that differs from base
+   * @param base destination snapshot used as the base operator for the join operation
+   * @return an optional file location for the tombstone file. If there are no tombstones associated with these
+   * snapshots or the base tombstones include all the variant tombstones then the method will return the tombstone
+   * output file location associated to the base summary. If not such file exists the method will return an empty
+   * optional. If there are variant tombstones which are unaccounted for in base then a new file will be created with
+   * the merged version the two snapshots' tombstones.
+   */
+  Optional<String> merge(Snapshot variant, Snapshot base);
 }

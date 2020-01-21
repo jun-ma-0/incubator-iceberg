@@ -23,6 +23,7 @@ import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.ExtendedTables;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
 import com.adobe.platform.iceberg.extensions.WithSpark;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
@@ -73,8 +74,9 @@ public class TestVacuumTombstones extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
-        .option("iceberg.extension.tombstone.values", "A,B")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "A,B")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode("append")
         .save(getTableLocation());
 
@@ -85,16 +87,16 @@ public class TestVacuumTombstones extends WithSpark {
     // and write data by overwriting only the files that include tombstone rows.
     spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .option("snapshot-id", readSnapshotId)
         .load(getTableLocation())
         .write()
         .mode(SaveMode.Overwrite)
         .format("iceberg.adobe")
         // This instructs the writer to use an overwrite commit of the files used by the reader
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .option("snapshot-id", readSnapshotId)
         .save(getTableLocation());
 
@@ -109,8 +111,9 @@ public class TestVacuumTombstones extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
-        .option("iceberg.extension.tombstone.values", "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -119,15 +122,15 @@ public class TestVacuumTombstones extends WithSpark {
 
     spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .load(getTableLocation())
         .write()
         .format("iceberg.adobe")
         .mode(SaveMode.Overwrite)
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .save(getTableLocation());
 

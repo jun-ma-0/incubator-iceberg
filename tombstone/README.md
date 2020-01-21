@@ -79,8 +79,9 @@ public static SparkSession spark;
 spark.createDataFrame([rows], [schema])
     .write()
     .format("iceberg.adobe")
-    .option("iceberg.extension.tombstone.col", "_acp_system_metadata.acp_sourceBatchId")
-    .option("iceberg.extension.tombstone.values", "a,b,c")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b,c")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
     .mode(SaveMode.Append)
     .save(getTableLocation())
 ``` 
@@ -93,7 +94,7 @@ public static SparkSession spark;
 spark
     .read()
     .format("iceberg.adobe")
-    .option("iceberg.extension.tombstone.col", "_acp_system_metadata.acp_sourceBatchId")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
     .load(getTableLocation())
     .count()
 ```
@@ -113,15 +114,15 @@ long snapshotId = table.currentSnapshot().snapshotId();
 
 spark.read()
     .format("iceberg.adobe")
-    .option("iceberg.extension.tombstone.vacuum", "")
-    .option("iceberg.extension.tombstone.col", "data")
+    .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
     .option("snapshot-id", snapshotId)
     .load(getTableLocation())
     .write()
     .format("iceberg.adobe")
     .mode(SaveMode.Overwrite)
-    .option("iceberg.extension.tombstone.vacuum", "")
-    .option("iceberg.extension.tombstone.col", "data")
+    .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+    .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
     .option("snapshot-id", snapshotId)
     .save(getTableLocation());
 ```

@@ -20,13 +20,16 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
+import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.base.Preconditions;
 import java.io.Serializable;
+import java.util.AbstractMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CherryPick;
@@ -44,11 +47,17 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
   private TombstoneExtension tombstoneExtension;
   private ExtendedTableOperations ops;
 
-  ExtendedBaseTable(ExtendedTableOperations ops, String name,
+  ExtendedBaseTable(
+      ExtendedTableOperations ops, String name,
       TombstoneExtension tombstoneExtension) {
     super(ops, name);
     this.tombstoneExtension = tombstoneExtension;
     this.ops = ops;
+  }
+
+  @Override
+  public ExtendedTableOperations ops() {
+    return this.ops;
   }
 
   @Override
@@ -63,22 +72,27 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
 
   @Override
   public AppendFiles newFastAppend() {
-    throw new RuntimeIOException(
-        "Support for fast append is not support in this extension of Iceberg.");
+    throw new RuntimeIOException("Support for fast append is not support in this extension of Iceberg.");
   }
 
   @Override
-  public Vacuum newVacuumTombstones(Map.Entry<String, Types.NestedField> column,
-      List<Entry> entries, Long readSnapshotId) {
+  public Vacuum newVacuumTombstones(
+      Map.Entry<String, Types.NestedField> column,
+      List<ExtendedEntry> entries, Long readSnapshotId) {
     return new BaseVacuum(ops, tombstoneExtension)
-        .tombstones(namespaceOf(column.getValue()), column.getKey(), entries, readSnapshotId);
+        .tombstones(namespaceOf(column.getValue()), column.getKey(),
+            entries.stream()
+                .map(e -> (EvictEntry) () -> new AbstractMap.SimpleEntry<>(e.getEntry(), e.getEvictTimestamp()))
+                .collect(Collectors.toList()),
+            readSnapshotId);
   }
 
   @Override
   public ExtendedAppendFiles newAppendWithTombstonesAdd(
       Types.NestedField column,
       List<Entry> entries,
-      Map<String, String> properties) {
+      Map<String, String> properties,
+      long evictionTs) {
     Preconditions.checkArgument(column != null, "Invalid column name: (null)");
     Preconditions.checkArgument(entries != null, "Invalid tombstone entries: (null)");
     Types.NestedField field = schema().findField(column.fieldId());
@@ -96,12 +110,11 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
         column.name());
 
     return new ExtendedMergeAppend(ops, tombstoneExtension)
-        .appendTombstones(namespaceOf(field), entries, properties);
+        .appendTombstones(namespaceOf(field), entries, properties, evictionTs);
   }
 
   @Override
-  public ExtendedAppendFiles newAppendWithTombstonesRemove(Types.NestedField column,
-      List<Entry> entries) {
+  public ExtendedAppendFiles newAppendWithTombstonesRemove(Types.NestedField column, List<EvictEntry> entries) {
     Preconditions.checkArgument(column != null, "Invalid column name: (null)");
     Preconditions.checkArgument(entries != null, "Invalid tombstone entries: (null)");
     Types.NestedField field = schema().findField(column.fieldId());
@@ -139,7 +152,7 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
 
   @Override
   public CherryPick cherrypick() {
-    return new CherryPickFromTombstoneSnapshot(ops);
+    return new CherryPickFromTombstoneSnapshot(ops, tombstoneExtension);
   }
 
   // Externally we reference a tombstone's namespace by the field name that we apply it to, internally we use the

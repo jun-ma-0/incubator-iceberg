@@ -371,6 +371,8 @@ project(':iceberg-tombstone') {
       exclude group: 'org.apache.parquet', module: 'parquet-hadoop'
     }
 
+    testCompile project(path: ':iceberg-core', configuration: 'testArtifacts')
+    testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
     testCompile("org.apache.spark:spark-sql_2.11")
   }
 }

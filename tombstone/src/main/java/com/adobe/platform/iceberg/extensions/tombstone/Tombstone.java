@@ -27,10 +27,21 @@ public class Tombstone {
   private String id;
   private String namespace;
   private Long addedOn;
-
+  private Long evictionTs;
   private Map<String, String> properties;
   private Map<String, String> internal;
 
+  public Tombstone() {}
+
+  public Tombstone(String id, String namespace, Long evictionTs) {
+    this.id = id;
+    this.namespace = namespace;
+    this.evictionTs = evictionTs;
+  }
+
+  public String getIdentity() {
+    return  String.format("%s.%s.%d", id.toLowerCase(), namespace.toLowerCase(), evictionTs);
+  }
   public String getId() {
     return id;
   }
@@ -53,6 +64,14 @@ public class Tombstone {
 
   public void setAddedOn(Long addedOn) {
     this.addedOn = addedOn;
+  }
+
+  public Long getEvictionTs() {
+    return evictionTs;
+  }
+
+  public void setEvictionTs(Long evictionTs) {
+    this.evictionTs = evictionTs;
   }
 
   public Map<String, String> getProperties() {
@@ -80,11 +99,11 @@ public class Tombstone {
       return false;
     }
     Tombstone tombstone = (Tombstone) o;
-    return id.equalsIgnoreCase(tombstone.id) && namespace.equalsIgnoreCase(tombstone.namespace);
+    return this.getIdentity().equals(tombstone.getIdentity());
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(id, namespace);
+    return Objects.hash(getIdentity());
   }
 }

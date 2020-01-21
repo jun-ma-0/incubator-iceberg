@@ -23,6 +23,7 @@ import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExpressions;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneValidationException;
 import java.io.Serializable;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -78,9 +79,7 @@ public class ExtendedReader extends Reader {
             tombstones.stream().map(t -> t.getEntry().getId()).collect(Collectors.toList()))
             .ifPresent(this::addFilter);
       } else {
-        throw new RuntimeIOException(String
-            .format("Using vacuum requires list of tombstones provided via option=%s",
-                TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST));
+        throw new TombstoneValidationException("Vacuum expects non-empty list of tombstones");
       }
     } else {
       this.tombstones = table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());

@@ -24,6 +24,7 @@ import com.adobe.platform.iceberg.extensions.Vacuum;
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneValidationException;
 import com.google.common.collect.ImmutableList;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Collections;
@@ -31,7 +32,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DataFile;
@@ -68,9 +68,7 @@ public class ExtendedWriter extends Writer {
     if (isVacuum) {
       Map.Entry<String, Types.NestedField> column = tombstoneColumn(options);
       long readSnapshotId = options.getLong("snapshot-id", 0L);
-      List<Entry> tombstones = table
-          .getSnapshotTombstones(column.getValue(), table.snapshot(readSnapshotId))
-          .stream().map(ExtendedEntry::getEntry).collect(Collectors.toList());
+      List<ExtendedEntry> tombstones = table.getSnapshotTombstones(column.getValue(), table.snapshot(readSnapshotId));
       vacuum(messages, tombstones, column, readSnapshotId);
     } else {
       List<Entry> tombstones = tombstoneValues(options);
@@ -78,7 +76,8 @@ public class ExtendedWriter extends Writer {
         super.commit(messages);
       } else {
         Map.Entry<String, Types.NestedField> column = tombstoneColumn(options);
-        appendWithTombstones(messages, tombstones, column.getValue());
+        Long tombstoneEvictTs = tombstoneEvictTs(options);
+        appendWithTombstones(messages, tombstones, column.getValue(), tombstoneEvictTs);
       }
     }
   }
@@ -93,8 +92,7 @@ public class ExtendedWriter extends Writer {
         return new SimpleEntry<>(columnName, column);
       }
     }
-    throw new RuntimeIOException(
-        String.format("Failed to find tombstone field by name: %s", tombstoneColumn));
+    throw new RuntimeIOException("Failed to find tombstone field by name: %s", tombstoneColumn);
   }
 
   @SuppressWarnings("checkstyle:HiddenField")
@@ -107,8 +105,16 @@ public class ExtendedWriter extends Writer {
     return Collections.emptyList();
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
+  private Long tombstoneEvictTs(DataSourceOptions options) {
+    return options.get(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS).map(Long::valueOf)
+        .orElseThrow(() -> new TombstoneValidationException(
+            "Expected value of type long for option=%s",
+            TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS));
+  }
+
   private void vacuum(
-      WriterCommitMessage[] messages, List<Entry> entries,
+      WriterCommitMessage[] messages, List<ExtendedEntry> entries,
       Map.Entry<String, Types.NestedField> column, Long readSnapshotId) {
     Vacuum vacuum = table.newVacuumTombstones(column, entries, readSnapshotId);
 
@@ -122,9 +128,8 @@ public class ExtendedWriter extends Writer {
   }
 
   private void appendWithTombstones(
-      WriterCommitMessage[] messages, List<Entry> entries,
-      Types.NestedField field) {
-    AppendFiles append = table.newAppendWithTombstonesAdd(field, entries, new HashMap<>());
+      WriterCommitMessage[] messages, List<Entry> entries, Types.NestedField field, long evictionTs) {
+    AppendFiles append = table.newAppendWithTombstonesAdd(field, entries, new HashMap<>(), evictionTs);
 
     int numFiles = 0;
     for (DataFile file : files(messages)) {

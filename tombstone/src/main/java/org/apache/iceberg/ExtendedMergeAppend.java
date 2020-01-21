@@ -21,11 +21,14 @@ package org.apache.iceberg;
 
 import com.adobe.platform.iceberg.extensions.ExtendedAppendFiles;
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
+import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.iceberg.io.OutputFile;
 
 public class ExtendedMergeAppend extends MergeAppend implements ExtendedAppendFiles {
@@ -33,8 +36,8 @@ public class ExtendedMergeAppend extends MergeAppend implements ExtendedAppendFi
   private TombstoneExtension tombstoneExtension;
 
   private Namespace namespace;
-  private List<Entry> toBeAdded = null;
-  private List<Entry> toBeRemoved = null;
+  private List<EvictEntry> toBeAdded = null;
+  private List<EvictEntry> toBeRemoved = null;
   private Map<String, String> toBeAddedProperties = new HashMap<>();
 
   public ExtendedMergeAppend(TableOperations ops, TombstoneExtension tombstoneExtension) {
@@ -46,16 +49,19 @@ public class ExtendedMergeAppend extends MergeAppend implements ExtendedAppendFi
   @Override
   @SuppressWarnings("checkstyle:HiddenField")
   public ExtendedAppendFiles appendTombstones(
-      Namespace namespace, List<Entry> entries, Map<String, String> properties) {
+      Namespace namespace, List<Entry> entries, Map<String, String> properties, long evictionTs) {
     this.namespace = namespace;
-    this.toBeAdded = entries;
+    this.toBeAdded =
+        entries.stream()
+            .map(e -> (EvictEntry) () -> new AbstractMap.SimpleEntry<>(e, evictionTs))
+            .collect(Collectors.toList());
     this.toBeAddedProperties = properties;
     return this;
   }
 
   @Override
   @SuppressWarnings("checkstyle:HiddenField")
-  public ExtendedAppendFiles removeTombstones(Namespace namespace, List<Entry> entries) {
+  public ExtendedAppendFiles removeTombstones(Namespace namespace, List<EvictEntry> entries) {
     this.namespace = namespace;
     this.toBeRemoved = entries;
     return this;
@@ -78,7 +84,9 @@ public class ExtendedMergeAppend extends MergeAppend implements ExtendedAppendFi
       // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
       this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, outputFile.location());
     } else if (this.toBeRemoved != null) {
-      OutputFile outputFile = tombstoneExtension.remove(ops.current().currentSnapshot(), this.toBeRemoved, namespace);
+      OutputFile outputFile = tombstoneExtension.remove(ops.current().currentSnapshot(),
+          this.toBeRemoved,
+          namespace);
       // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
       // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
       this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, outputFile.location());

@@ -20,8 +20,10 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import java.util.AbstractMap;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.iceberg.AppendFiles;
@@ -40,19 +42,22 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles first = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     first.commit();
 
     AppendFiles second = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "4", () -> "5", () -> "6"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     second.commit();
 
     AppendFiles third = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "7", () -> "8", () -> "9"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     third.commit();
 
     List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
@@ -72,7 +77,8 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles appendFilesAndAddTombstones = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "1001", () -> "2002", () -> "3003"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
 
     // Append files aPath, bPath, cPath and add tombstones `1001`, `2002` and `3003`
     appendFilesAndAddTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
@@ -95,7 +101,9 @@ public class TestExtendedTable extends WithSpark {
     // Append dPath and remove tombstones `1001` and `2002`
     AppendFiles appendFilesAndRemoveTombstones = table.newAppendWithTombstonesRemove(
         batchField,
-        Lists.newArrayList(() -> "1001", () -> "2002"));
+        ImmutableList.of(
+            () -> new AbstractMap.SimpleEntry<>(() -> "1001", 1579792561L),
+            () -> new AbstractMap.SimpleEntry<>(() -> "2002", 1579792561L)));
     appendFilesAndRemoveTombstones.appendFile(DataFiles.builder(SimpleRecord.spec)
         .withPath("dPath.parquet")
         .withFileSizeInBytes(12345L)
@@ -130,7 +138,8 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles first = table.newAppendWithTombstonesAdd(
         noSuchColumn,
         Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     first.commit();
   }
 
@@ -139,10 +148,13 @@ public class TestExtendedTable extends WithSpark {
     ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField noSuchColumn = table.schema().findField("noSuchColumn");
 
-    AppendFiles first = table.newAppendWithTombstonesRemove(
+    table.newAppendWithTombstonesRemove(
         noSuchColumn,
-        Lists.newArrayList(() -> "1", () -> "2", () -> "3"));
-    first.commit();
+        ImmutableList.of(
+            () -> new AbstractMap.SimpleEntry<>(() -> "1", 1579792561L),
+            () -> new AbstractMap.SimpleEntry<>(() -> "2", 1579792561L),
+            () -> new AbstractMap.SimpleEntry<>(() -> "3", 1579792561L)))
+        .commit();
   }
 
   @Test(expected = java.lang.IllegalArgumentException.class)
@@ -160,13 +172,15 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles first = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "1001", () -> "1002", () -> "1003"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     first.commit();
 
     AppendFiles second = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "2001", () -> "2002", () -> "2003"),
-        ImmutableMap.of("purgeByMillis", "1571226999000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226999000", "reason", "test"),
+        1579792561L);
     second.commit();
 
     List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
@@ -190,7 +204,8 @@ public class TestExtendedTable extends WithSpark {
     AppendFiles appendFilesAndAddTombstones = table.newAppendWithTombstonesAdd(
         batchField,
         Lists.newArrayList(() -> "1001", () -> "2002", () -> "3003"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"));
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
     appendFilesAndAddTombstones.commit();
 
     Types.NestedField idField = table.schema().findField("id");

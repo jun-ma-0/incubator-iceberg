@@ -19,7 +19,7 @@
 
 package com.adobe.platform.iceberg.extensions;
 
-import com.adobe.platform.iceberg.extensions.tombstone.Entry;
+import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExpressions;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
@@ -38,7 +38,7 @@ import org.apache.iceberg.io.OutputFile;
 class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
 
   private Namespace namespace;
-  private List<Entry> toBeRemoved = null;
+  private List<EvictEntry> toBeRemoved = null;
   private ExtendedTableOperations ops;
   private TombstoneExtension tombstoneExtension;
 
@@ -74,7 +74,7 @@ class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
    * @param readSnapshotId the snapshot id that was used to read the data
    */
   @SuppressWarnings("checkstyle:HiddenField")
-  public Vacuum tombstones(Namespace namespace, String columnName, List<Entry> entries, Long readSnapshotId) {
+  public Vacuum tombstones(Namespace namespace, String columnName, List<EvictEntry> entries, Long readSnapshotId) {
     Preconditions.checkArgument(readSnapshotId > 0L, "Invalid read snapshot id, expected greater than 0 (zero)");
 
     this.namespace = namespace;
@@ -82,7 +82,7 @@ class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
 
     Optional<Expression> expression = TombstoneExpressions.matchesAny(
         columnName,
-        entries.stream().map(Entry::getId).collect(Collectors.toList()));
+        entries.stream().map(e -> e.get().getKey().getId()).collect(Collectors.toList()));
 
     if (expression.isPresent()) {
       this.overwriteByRowFilter(expression.get());

@@ -22,6 +22,7 @@ package org.apache.iceberg.spark.source;
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
 import com.adobe.platform.iceberg.extensions.WithSpark;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -69,11 +70,12 @@ public class TestExtendedReader extends WithSpark {
     Types.NestedField batchField = table.schema().findField("batch");
 
     // Tombstone batches with values `A`
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap()).commit();
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1579792561L)
+        .commit();
 
     List<SimpleRecord> actual = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -116,21 +118,21 @@ public class TestExtendedReader extends WithSpark {
 
     // Tombstone batches by batch field
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "U"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "W"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "X"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "Y"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "Z"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
 
     List<SimpleRecord> expectedWithoutTombstone = spark.read()
         .format("iceberg")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -141,7 +143,7 @@ public class TestExtendedReader extends WithSpark {
 
     List<SimpleRecord> tombstoneA = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -152,11 +154,11 @@ public class TestExtendedReader extends WithSpark {
 
     // Tombstone batches by batch field
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "B"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
 
     List<SimpleRecord> tombstoneAB = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -167,11 +169,11 @@ public class TestExtendedReader extends WithSpark {
 
     // Tombstone batches by batch field
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "C"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
 
     List<SimpleRecord> tombstoneABC = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -182,11 +184,11 @@ public class TestExtendedReader extends WithSpark {
 
     // Tombstone batches by batch field
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "D"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
 
     List<SimpleRecord> tombstoneABCD = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .orderBy("id")
@@ -229,15 +231,15 @@ public class TestExtendedReader extends WithSpark {
 
     // Tombstone batches by batch field
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "B"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "C"),
-        Collections.emptyMap()).commit();
+        Collections.emptyMap(), 1579792561L).commit();
 
     long countAfterTombstone = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
         .select("id", "timestamp", "batch", "data")
         .count();
@@ -247,28 +249,28 @@ public class TestExtendedReader extends WithSpark {
 
     Dataset<Row> verifySum = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long sum = verifySum.agg(functions.sum(verifySum.col("id"))).collectAsList().get(0).getLong(0);
     Assert.assertEquals("Rows sum must match 120 (sum all but `batch` A, B, C)", 120, sum);
 
     Dataset<Row> verifyMin = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long min = verifyMin.agg(functions.min(verifyMin.col("id"))).collectAsList().get(0).getInt(0);
     Assert.assertEquals("Rows min must match 5 (min but `batch` A, B, C and that's D)", 5, min);
 
     Dataset<Row> verifyMax = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long max = verifyMax.agg(functions.max(verifyMax.col("id"))).collectAsList().get(0).getInt(0);
     Assert.assertEquals("Rows max must match 15 (max but `batch` A, B, C and that's O)", 15, max);
 
     Dataset<Row> verifyAvg = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "batch")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     double avg = verifyAvg.agg(functions.avg(verifyAvg.col("id"))).collectAsList().get(0).getDouble(0);
     Assert.assertEquals("Rows max must match 10.0 (avg all but `batch` A, B, C)", 10.0, avg, 0.0);

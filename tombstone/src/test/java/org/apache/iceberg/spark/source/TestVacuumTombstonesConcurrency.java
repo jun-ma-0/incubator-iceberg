@@ -23,6 +23,7 @@ import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.ExtendedTables;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
 import com.adobe.platform.iceberg.extensions.WithSpark;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
@@ -92,8 +93,9 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
-        .option("iceberg.extension.tombstone.values", "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -103,8 +105,8 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
     // Reduce tombstone rows
     Dataset<Row> data = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .load(getTableLocation());
 
@@ -113,8 +115,9 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
-        .option("iceberg.extension.tombstone.values", "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -122,8 +125,8 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
     data.write()
         .format("iceberg.adobe")
         .mode(SaveMode.Overwrite)
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .save(getTableLocation());
   }
@@ -135,8 +138,9 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
-        .option("iceberg.extension.tombstone.values", "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -146,8 +150,8 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
     // Reduce tombstone rows
     Dataset<Row> data = spark.read()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .load(getTableLocation());
 
@@ -156,7 +160,6 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -165,7 +168,6 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .option("iceberg.extension.tombstone.col", "data")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
@@ -173,8 +175,8 @@ public class TestVacuumTombstonesConcurrency extends WithSpark {
     data.write()
         .format("iceberg.adobe")
         .mode(SaveMode.Overwrite)
-        .option("iceberg.extension.tombstone.vacuum", "")
-        .option("iceberg.extension.tombstone.col", "data")
+        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
         .option("snapshot-id", snapshotId)
         .save(getTableLocation());
 

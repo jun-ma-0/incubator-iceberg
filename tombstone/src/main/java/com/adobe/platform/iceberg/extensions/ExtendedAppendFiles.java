@@ -20,6 +20,7 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
+import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import java.util.List;
 import java.util.Map;
@@ -33,16 +34,21 @@ public interface ExtendedAppendFiles extends AppendFiles {
    * @param namespace a namespace
    * @param entries tombstone values
    * @param properties tombstone properties
+   * @param evictionTs a timestamp that indicates the expected maximum retention of data marked by this tombstone
    * @return this for method chaining
    */
-  ExtendedAppendFiles appendTombstones(Namespace namespace, List<Entry> entries, Map<String, String> properties);
+  ExtendedAppendFiles appendTombstones(
+      Namespace namespace,
+      List<Entry> entries,
+      Map<String, String> properties,
+      long evictionTs);
 
   /**
    * Removes tombstone {@link Entry} to the snapshot.
    *
    * @param namespace a namespace
-   * @param entries tombstone values
+   * @param entries tombstone with associated eviction timestamps
    * @return this for method chaining
    */
-  ExtendedAppendFiles removeTombstones(Namespace namespace, List<Entry> entries);
+  ExtendedAppendFiles removeTombstones(Namespace namespace, List<EvictEntry> entries);
 }

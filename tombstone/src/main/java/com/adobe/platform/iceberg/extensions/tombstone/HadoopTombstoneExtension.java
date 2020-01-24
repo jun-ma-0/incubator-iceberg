@@ -148,7 +148,8 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
     List<Tombstone> baseTombstones = load(base);
     if (baseTombstones.containsAll(variantTombstones)) {
       // noop, just make sure we pick up the current snapshot tombstone file, if available.
-      return Optional.ofNullable(base.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));
+      return (base == null || base.summary() == null) ? Optional.empty()
+          : Optional.ofNullable(base.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));
     } else {
       OutputFile outputFile = newTombstonesFile(ops.current());
       try {

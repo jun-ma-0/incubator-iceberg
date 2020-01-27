@@ -31,13 +31,12 @@ import org.apache.avro.file.FileReader;
 import org.apache.avro.file.SeekableInput;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.DatumWriter;
+import org.apache.avro.mapred.FsInput;
 import org.apache.avro.reflect.ReflectData;
 import org.apache.avro.reflect.ReflectDatumReader;
 import org.apache.avro.reflect.ReflectDatumWriter;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.AvroFSInput;
 import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileContext;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
@@ -53,7 +52,9 @@ public class Tombstones {
     List<Tombstone> tombstones = new ArrayList<>();
     Schema schema = REFLECT_DATA.getSchema(Tombstone.class);
     DatumReader<Tombstone> datumReader = new ReflectDatumReader<>(schema);
-    SeekableInput input = new AvroFSInput(FileContext.getFileContext(configuration), new Path(fileName));
+    // Note: don't use alternative {@link org.apache.hadoop.fs.AvroFSInput} it causes exceptions w/ DB runtime
+    // Issue tracked at https://jira.corp.adobe.com/browse/PLAT-48669
+    SeekableInput input = new FsInput(new Path(fileName), configuration);
     try (FileReader<Tombstone> dataFileReader = DataFileReader.openReader(input, datumReader)) {
       while (dataFileReader.hasNext()) {
         tombstones.add(dataFileReader.next(null));

@@ -33,6 +33,7 @@ public interface TombstoneExtension {
   // This links the file we've used to store the provided tombstones to a snapshot summary property for Iceberg
   String SNAPSHOT_TOMBSTONE_FILE_PROPERTY = "iceberg.extension.tombstone.file";
   String TOMBSTONE_VACUUM = "iceberg.extension.tombstone.vacuum";
+  String TOMBSTONE_NOOP = "iceberg.extension.tombstone.noop";
 
   /**
    * Retrieves list of {@link ExtendedEntry} tombstones

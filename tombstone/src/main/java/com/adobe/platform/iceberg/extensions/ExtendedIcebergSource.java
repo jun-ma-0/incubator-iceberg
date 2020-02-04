@@ -20,6 +20,7 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
+import com.adobe.platform.iceberg.extensions.tombstone.TombstoneValidationException;
 import com.google.common.base.Preconditions;
 import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
@@ -56,18 +57,21 @@ public class ExtendedIcebergSource extends IcebergSource
 
   @Override
   protected DataSourceReader reader(Table table, boolean caseSensitive, DataSourceOptions options) {
-    String tombstoneFieldName = options.get(TombstoneExtension.TOMBSTONE_COLUMN).orElse("");
-    if (!tombstoneFieldName.isEmpty()) {
-      Types.NestedField tombstoneField = table.schema().caseInsensitiveFindField(tombstoneFieldName);
-      Preconditions.checkArgument(tombstoneField != null, "Invalid tombstone column: %s", tombstoneFieldName);
-      LOG.debug("Use extended reader based on matching tombstone field={} for table={}", tombstoneField.name(),
-          table.location());
-      ExtendedTable extendedTable = getTableAndResolveHadoopConfiguration(options, new Configuration(lazyBaseConf()));
-      return new ExtendedReader(extendedTable, caseSensitive, options, tombstoneField, tombstoneFieldName);
+    boolean tombstoneNoop = options.getBoolean(TombstoneExtension.TOMBSTONE_NOOP, false);
+    if (tombstoneNoop) {
+      LOG.debug("Fallback to default Iceberg reader for table={}", table.location());
+      return super.reader(table, caseSensitive, options);
     }
-    LOG.debug("Fallback to default Iceberg reader, missing or empty tombstone option={} for table={}",
-        TombstoneExtension.TOMBSTONE_COLUMN, table.location());
-    return super.reader(table, caseSensitive, options);
+    String tombstoneFieldName = options.get(TombstoneExtension.TOMBSTONE_COLUMN).orElse("");
+    if (tombstoneFieldName.isEmpty()) {
+      throw new TombstoneValidationException("Expect tombstone column option=%s", TombstoneExtension.TOMBSTONE_COLUMN);
+    }
+    Types.NestedField tombstoneField = table.schema().caseInsensitiveFindField(tombstoneFieldName);
+    Preconditions.checkArgument(tombstoneField != null, "Invalid tombstone column: %s", tombstoneFieldName);
+    LOG.debug("Use extended reader based on matching tombstone field={} for table={}", tombstoneField.name(),
+        table.location());
+    ExtendedTable extendedTable = getTableAndResolveHadoopConfiguration(options, new Configuration(lazyBaseConf()));
+    return new ExtendedReader(extendedTable, caseSensitive, options, tombstoneField, tombstoneFieldName);
   }
 
   @Override
@@ -76,20 +80,24 @@ public class ExtendedIcebergSource extends IcebergSource
       Configuration hadoopConf, int numRecordsPerBatch, SparkSession sparkSession) {
     Configuration configuration = new Configuration(lazyBaseConf());
 
-    String tombstoneColumnName = options.get(TombstoneExtension.TOMBSTONE_COLUMN).orElse("");
-    if (!tombstoneColumnName.isEmpty()) {
-      Types.NestedField tombstoneField = table.schema().caseInsensitiveFindField(tombstoneColumnName);
-      Preconditions.checkArgument(tombstoneField != null, "Invalid tombstone column: %s", tombstoneColumnName);
-      LOG.debug(
-          "Use extended vectorized reader based on matching tombstone field={} for table={}",
-          tombstoneField.name(),
-          table.location());
-      return new ExtendedVectorizedReader(getTableAndResolveHadoopConfiguration(options, configuration),
-          caseSensitive, options, configuration, numRecordsPerBatch, sparkSession, tombstoneField, tombstoneColumnName);
+    boolean tombstoneNoop = options.getBoolean(TombstoneExtension.TOMBSTONE_NOOP, false);
+    if (tombstoneNoop) {
+      LOG.debug("Fallback to vectorized default Iceberg reader for table={}", table.location());
+      return super.vectorizedReader(table, caseSensitive, options, hadoopConf, numRecordsPerBatch, sparkSession);
     }
-    LOG.debug("Fallback to vectorized Iceberg reader, missing or empty tombstone option={} for table={}",
-        TombstoneExtension.TOMBSTONE_COLUMN, table.location());
-    return super.vectorizedReader(table, caseSensitive, options, hadoopConf, numRecordsPerBatch, sparkSession);
+    String tombstoneFieldName = options.get(TombstoneExtension.TOMBSTONE_COLUMN).orElse("");
+    if (tombstoneFieldName.isEmpty()) {
+      throw new TombstoneValidationException("Expect tombstone column option=%s", TombstoneExtension.TOMBSTONE_COLUMN);
+    }
+
+    Types.NestedField tombstoneField = table.schema().caseInsensitiveFindField(tombstoneFieldName);
+    Preconditions.checkArgument(tombstoneField != null, "Invalid tombstone column: %s", tombstoneFieldName);
+    LOG.debug(
+        "Use extended vectorized reader based on matching tombstone field={} for table={}",
+        tombstoneField.name(),
+        table.location());
+    return new ExtendedVectorizedReader(getTableAndResolveHadoopConfiguration(options, configuration),
+        caseSensitive, options, configuration, numRecordsPerBatch, sparkSession, tombstoneField, tombstoneFieldName);
   }
 
   @Override

@@ -29,7 +29,14 @@ import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.AppendFiles;
@@ -43,7 +50,9 @@ import org.apache.iceberg.types.Types;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestWapWorkflowOverTombstone extends WithSpark {
+import static java.util.stream.Collectors.toList;
+
+public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecutorService{
 
   @Test
   public void testSerialCherrypickWithTombstone() {
@@ -109,63 +118,44 @@ public class TestWapWorkflowOverTombstone extends WithSpark {
     return Lists.newArrayList(table.snapshots());
   }
 
+  private Callable<String> doCherrypick(ExtendedTable table, Long snapshotId) {
+    return () -> {
+      table.cherrypick().cherrypick(snapshotId).commit();
+      return String.valueOf(snapshotId);
+    };
+  }
+
   @Test
-  public void testParallelCherrypickWithTombstone() {
+  public void testParallelCherrypickWithTombstone() throws InterruptedException {
     ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
-    Types.NestedField batchField = table.schema().findField("batch");
+    Types.NestedField field = table.schema().findField("batch");
 
-    AppendFiles first = table.newAppendWithTombstonesAdd(
-        batchField,
-        Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
-        1579792561L);
-    first.commit();
+    int stagedSnapshotCnt = 5;
+    LongStream stagedSnapshots  = IntStream.range(0, stagedSnapshotCnt).mapToLong(i -> {
+          table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> String.valueOf(i)), Collections.emptyMap(), 1579792561L)
+              .set("wap.id", String.valueOf(i))
+              .stageOnly()
+              .commit();
+          List<Snapshot> snapshots = listSnapshots(table);
+          return snapshots.get(snapshots.size() - 1).snapshotId();
+        });
 
-    AppendFiles second = table.newAppendWithTombstonesAdd(
-        batchField,
-        Lists.newArrayList(() -> "4", () -> "5", () -> "6"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
-        1579792561L);
+    // This will generate 100 callable commit operations with all tombstones available from 0 to 100
+    List<Callable<String>> commits = stagedSnapshots.mapToObj(snapshot -> doCherrypick(table, snapshot)).collect(toList());
 
-    second.set("wap.id", "456")
-        .stageOnly()
-        .commit();
+    // All commits will be executed on a fixed thread pool of two threads
+    ExecutorService executorService = Executors.newFixedThreadPool(2);
 
-    List<Snapshot> snapshots = listSnapshots(table);
-    Snapshot staged1Snapshot = snapshots.get(snapshots.size() - 1);
-    Assert.assertEquals("Check for staged wap id 1", "456", staged1Snapshot.summary().get("wap.id"));
+    try {
+      executorService.invokeAll(commits, 30, TimeUnit.SECONDS);
+    } finally {
+      shutdownAndAwaitTermination(executorService);
+    }
 
-    AppendFiles third = table.newAppendWithTombstonesAdd(
-        batchField,
-        Lists.newArrayList(() -> "7", () -> "8", () -> "9"),
-        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
-        1579792561L);
-    third.set("wap.id", "789")
-        .stageOnly()
-        .commit();
-
-    snapshots = listSnapshots(table);
-    Snapshot staged2Snapshot = snapshots.get(snapshots.size() - 1);
-    Assert.assertEquals("Check for staged wap id 2", "789", staged2Snapshot.summary().get("wap.id"));
-
-    // cherrypick both staged snapshots to simulate parallel  cherry-picking
-    table.cherrypick().cherrypick(staged1Snapshot.snapshotId()).commit();
-    table.cherrypick().cherrypick(staged2Snapshot.snapshotId()).commit();
-
-    snapshots = listSnapshots(table);
-    Assert.assertEquals("Snapshot count should include both staged and published snapshots", 5, snapshots.size());
-
-    List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(
-        batchField,
-        table.currentSnapshot());
-
-    List<String> collect = currentSnapshotTombstones.stream()
-        .map(t -> t.getEntry().getId())
-        .collect(Collectors.toList());
-
-    Assert.assertTrue(
-        "Expect all appended tombstones in second set are available in the current snapshot and no more",
-        collect.size() == 9 && collect.containsAll(Lists.newArrayList("1", "2", "3", "4", "5", "6", "7", "8", "9")));
+    int tombstonesCount = table.getSnapshotTombstones(field, table.currentSnapshot()).size();
+    int snapshotCount = Iterables.size(table.snapshots());
+    int publishedSnapshotCount = snapshotCount - stagedSnapshotCnt;
+    Assert.assertEquals("Expect tombstone count is the same as published snapshot count", publishedSnapshotCount, tombstonesCount);
   }
 
   @Test

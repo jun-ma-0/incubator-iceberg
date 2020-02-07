@@ -36,7 +36,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.AppendFiles;
@@ -52,7 +51,7 @@ import org.junit.Test;
 
 import static java.util.stream.Collectors.toList;
 
-public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecutorService{
+public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecutorService {
 
   @Test
   public void testSerialCherrypickWithTombstone() {
@@ -87,7 +86,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
         .collect(Collectors.toList());
     Assert.assertTrue(
         "Expect all appended tombstones in first set are available in the current snapshot and no more",
-        tombstonesAfter.size() == 6 && tombstonesAfter.containsAll(Lists.newArrayList("1", "2", "3", "4", "5", "6")));
+        tombstonesAfter.size() == 6 && tombstonesAfter.containsAll(
+            Lists.newArrayList("1", "2", "3", "4", "5", "6")));
 
     AppendFiles third = table.newAppendWithTombstonesAdd(
         batchField,
@@ -110,7 +110,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
 
     Assert.assertTrue(
         "Expect all appended tombstones in second set are available in the current snapshot and no more",
-        collect.size() == 9 && collect.containsAll(Lists.newArrayList("1", "2", "3", "4", "5", "6", "7", "8", "9")));
+        collect.size() == 9 && collect.containsAll(
+            Lists.newArrayList("1", "2", "3", "4", "5", "6", "7", "8", "9")));
   }
 
   private List<Snapshot> listSnapshots(ExtendedTable table) {
@@ -132,16 +133,18 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
 
     int stagedSnapshotCount = 100;
     LongStream stagedSnapshots  = IntStream.range(0, stagedSnapshotCount).mapToLong(i -> {
-          table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> String.valueOf(i)), Collections.emptyMap(), i)
+      table.newAppendWithTombstonesAdd(field,
+              Lists.newArrayList(() -> String.valueOf(i)), Collections.emptyMap(), i)
               .set("wap.id", String.valueOf(i))
               .stageOnly()
               .commit();
-          List<Snapshot> snapshots = listSnapshots(table);
-          return snapshots.get(snapshots.size() - 1).snapshotId();
-        });
+      List<Snapshot> snapshots = listSnapshots(table);
+      return snapshots.get(snapshots.size() - 1).snapshotId();
+    });
 
     // This will generate 100 callable commit operations with all tombstones available from 0 to 100
-    List<Callable<String>> commits = stagedSnapshots.mapToObj(snapshot -> doCherrypick(table, snapshot)).collect(toList());
+    List<Callable<String>> commits = stagedSnapshots.mapToObj(snapshot ->
+        doCherrypick(table, snapshot)).collect(toList());
 
     // All commits will be executed on a fixed thread pool of two threads
     ExecutorService executorService = Executors.newFixedThreadPool(2);
@@ -155,7 +158,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     int tombstonesCount = table.getSnapshotTombstones(field, table.currentSnapshot()).size();
     int snapshotCount = Iterables.size(table.snapshots());
     int publishedSnapshotCount = snapshotCount - stagedSnapshotCount;
-    Assert.assertEquals("Expect published snapshot count is the same as tombstone count", publishedSnapshotCount, tombstonesCount);
+    Assert.assertEquals("Expect published snapshot count is the same as tombstone count",
+        publishedSnapshotCount, tombstonesCount);
     Assert.assertEquals("Expect 100 published snapshot", 100, publishedSnapshotCount);
     Assert.assertEquals("Expect 100 tombstoned values ", 100, tombstonesCount);
   }
@@ -188,7 +192,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     Snapshot staged2Snapshot = snapshots.get(snapshots.size() - 1);
 
     // Intermittent append of new tombstone
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "99"), Collections.emptyMap(), 1579792561L)
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "99"),
+        Collections.emptyMap(), 1579792561L)
         .commit();
     // Intermittent remove of same tombstones as from first staged snapshot
     table.newAppendWithTombstonesRemove(
@@ -202,7 +207,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     table.cherrypick().cherrypick(staged1Snapshot.snapshotId()).commit();
 
     // Intermittent append of new tombstones
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "98"), Collections.emptyMap(), 1579792561L)
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "98"),
+        Collections.emptyMap(), 1579792561L)
         .commit();
     // Intermittent remove of same tombstones as from second staged snapshot
     table.newAppendWithTombstonesRemove(
@@ -215,7 +221,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     table.cherrypick().cherrypick(staged2Snapshot.snapshotId()).commit();
 
     snapshots = listSnapshots(table);
-    Assert.assertEquals("Snapshot count should include both staged and published snapshots", 9, snapshots.size());
+    Assert.assertEquals("Snapshot count should include both staged and published snapshots", 9,
+        snapshots.size());
 
     table.refresh();
     List<ExtendedEntry> tombstones = table.getSnapshotTombstones(batchField, table.currentSnapshot());
@@ -223,7 +230,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
 
     Assert.assertTrue(
         "Expect all appended tombstones in second set are available in the current snapshot and no more",
-        collect.size() == 11 && collect.containsAll(Lists.newArrayList("1", "2", "3", "4", "5", "6", "7", "8", "9",
+        collect.size() == 11 && collect.containsAll(
+            Lists.newArrayList("1", "2", "3", "4", "5", "6", "7", "8", "9",
             "99", "98")));
   }
 
@@ -295,7 +303,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
         .withRecordCount(1)
         .build();
 
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1579792561L)
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"),
+        Collections.emptyMap(), 1579792561L)
         .appendFile(fileA)
         .commit();
 
@@ -372,7 +381,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
         .withRecordCount(1)
         .build();
 
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1579792561L)
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"),
+        Collections.emptyMap(), 1579792561L)
         .appendFile(fileA)
         .commit();
     long firstSnapshotId = table.currentSnapshot().snapshotId();
@@ -384,7 +394,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
         .build();
 
     // first WAP commit
-    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "B"), Collections.emptyMap(), 1579792561L)
+    table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "B"),
+        Collections.emptyMap(), 1579792561L)
         .appendFile(fileB)
         .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
         .stageOnly()
@@ -405,7 +416,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     table.cherrypick().cherrypick(wapSnapshot.snapshotId()).commit();
 
     Assert.assertEquals("Should have three snapshots", 3, listSnapshots(table).size());
-    Assert.assertEquals("Should contain manifests for both files", 2, table.currentSnapshot().manifests().size());
+    Assert.assertEquals("Should contain manifests for both files", 2,
+        table.currentSnapshot().manifests().size());
     Assert.assertEquals("Should contain append from last commit", 1,
         Iterables.size(table.currentSnapshot().addedFiles()));
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 2,
@@ -460,7 +472,8 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
 
     Assert.assertTrue(
         "Expect all appended tombstones in second set are available in the current snapshot and no more",
-        tombstoneIds.size() == 6 && tombstoneIds.containsAll(Lists.newArrayList("1", "2", "3", "4", "5", "6")));
+        tombstoneIds.size() == 6 && tombstoneIds.containsAll(
+            Lists.newArrayList("1", "2", "3", "4", "5", "6")));
 
     Map<String, String> purgeByMillisByTombstoneId = snapshotTombstones
         .stream()

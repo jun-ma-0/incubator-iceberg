@@ -130,9 +130,9 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
     Types.NestedField field = table.schema().findField("batch");
 
-    int stagedSnapshotCnt = 5;
-    LongStream stagedSnapshots  = IntStream.range(0, stagedSnapshotCnt).mapToLong(i -> {
-          table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> String.valueOf(i)), Collections.emptyMap(), 1579792561L)
+    int stagedSnapshotCount = 100;
+    LongStream stagedSnapshots  = IntStream.range(0, stagedSnapshotCount).mapToLong(i -> {
+          table.newAppendWithTombstonesAdd(field, Lists.newArrayList(() -> String.valueOf(i)), Collections.emptyMap(), i)
               .set("wap.id", String.valueOf(i))
               .stageOnly()
               .commit();
@@ -154,8 +154,10 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
 
     int tombstonesCount = table.getSnapshotTombstones(field, table.currentSnapshot()).size();
     int snapshotCount = Iterables.size(table.snapshots());
-    int publishedSnapshotCount = snapshotCount - stagedSnapshotCnt;
-    Assert.assertEquals("Expect tombstone count is the same as published snapshot count", publishedSnapshotCount, tombstonesCount);
+    int publishedSnapshotCount = snapshotCount - stagedSnapshotCount;
+    Assert.assertEquals("Expect published snapshot count is the same as tombstone count", publishedSnapshotCount, tombstonesCount);
+    Assert.assertEquals("Expect 100 published snapshot", 100, publishedSnapshotCount);
+    Assert.assertEquals("Expect 100 tombstoned values ", 100, tombstonesCount);
   }
 
   @Test

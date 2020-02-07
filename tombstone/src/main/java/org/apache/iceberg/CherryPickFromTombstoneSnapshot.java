@@ -38,9 +38,12 @@ public class CherryPickFromTombstoneSnapshot extends CherryPickFromSnapshot {
     List<ManifestFile> apply = super.apply(base);
 
     // Handle tombstones merge
+    // Note: We should use `base` instead of `getBase()` to get current snapshot. Because there is a refresh happening
+    //      in SnapshotProducer.apply(), which may cause getBase() referring to a staled table. `base` is the latest
+    //      version that is used to generate new snapshot.
     Optional<String> outputFilePath = tombstoneExtension.merge(
-        getBase().snapshot(getCherryPickSnapshotId()),
-        getBase().currentSnapshot());
+        base.snapshot(getCherryPickSnapshotId()),
+        base.currentSnapshot());
 
     // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
     // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither

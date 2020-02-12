@@ -21,21 +21,24 @@ package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
+import com.adobe.platform.iceberg.extensions.tombstone.SupportsTombstoneFilters;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExpressions;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.types.Types;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;
 
-public class ExtendedVectorizedReader extends V1VectorizedReader {
+public class ExtendedVectorizedReader extends V1VectorizedReader implements SupportsTombstoneFilters {
 
   private ExtendedTable table;
   private Types.NestedField tombstoneField;
   // We preserve the dotted notation field name since org.apache.iceberg.types.Types.NestedField does not provide
   // full precedence of field using dot notation so we will fail all SQL queries
   private String tombstoneFieldName;
+  private List<String> tombstoneValues;
 
   public ExtendedVectorizedReader(
       ExtendedTable table,
@@ -50,6 +53,8 @@ public class ExtendedVectorizedReader extends V1VectorizedReader {
     this.tombstoneField = tombstoneField;
     this.table = table;
     this.tombstoneFieldName = tombstoneFieldName;
+    List<ExtendedEntry> tombstones = this.table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
+    this.tombstoneValues = tombstones.stream().map(t -> t.getEntry().getId()).collect(Collectors.toList());
   }
 
   @Override
@@ -57,5 +62,16 @@ public class ExtendedVectorizedReader extends V1VectorizedReader {
     List<ExtendedEntry> tombstones = table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
     TombstoneExpressions.notIn(tombstoneFieldName, tombstones).ifPresent(this::addFilter);
     return super.pushFilters(filters);
+  }
+
+
+  @Override
+  public String tombstoneField() {
+    return tombstoneFieldName;
+  }
+
+  @Override
+  public String[] tombstoneValues() {
+    return (this.tombstoneValues == null) ? new String[0] : this.tombstoneValues.toArray(new String[0]);
   }
 }

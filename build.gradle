@@ -359,6 +359,8 @@ project(':iceberg-spark-runtime') {
 
 
 project(':iceberg-tombstone') {
+  apply plugin: 'scala'
+
   dependencies {
     compileOnly project(':iceberg-api')
     compileOnly project(':iceberg-core')

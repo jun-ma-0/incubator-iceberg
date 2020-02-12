@@ -20,13 +20,18 @@
 package com.adobe.platform.iceberg.extensions;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.execution.SparkStrategy;
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2StrategyWithAdobeFilteringAndPruning$;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
+import scala.collection.JavaConverters;
 
 public class WithSpark implements WithDefaultIcebergTable {
   public static SparkSession spark;
@@ -43,6 +48,14 @@ public class WithSpark implements WithDefaultIcebergTable {
     WithSpark.spark = SparkSession.builder()
         .master("local[2]")
         .getOrCreate();
+
+    // enable Adobe pruning and filtering strategy
+    if (WithSpark.spark != null) {
+      List<SparkStrategy> extra = new ArrayList<>();
+      extra.add(DataSourceV2StrategyWithAdobeFilteringAndPruning$.MODULE$);
+      WithSpark.spark.experimental().extraStrategies_$eq(
+          JavaConverters.asScalaBufferConverter(extra).asScala().toSeq());
+    }
   }
 
   @AfterClass

@@ -160,8 +160,6 @@ public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecu
     int publishedSnapshotCount = snapshotCount - stagedSnapshotCount;
     Assert.assertEquals("Expect published snapshot count is the same as tombstone count",
         publishedSnapshotCount, tombstonesCount);
-    Assert.assertEquals("Expect 100 published snapshot", 100, publishedSnapshotCount);
-    Assert.assertEquals("Expect 100 tombstoned values ", 100, tombstonesCount);
   }
 
   @Test

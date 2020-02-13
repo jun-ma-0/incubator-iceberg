@@ -203,4 +203,66 @@ public class TestExtendedWriterNestedField extends WithSpark {
 
     Assert.assertEquals("Result rows should only match z", 3, load.count());
   }
+
+
+  @Test
+  public void testWriterNOOPTombstonesAndAppendTombstonesOnTwoLevelStructField() {
+    Timestamp ts = Timestamp.valueOf("2019-10-10 10:10:10.10");
+
+    List<Row> rows = Lists.newArrayList(
+        RowFactory.create(101, ts, "A", RowFactory.create("X", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("x"))),
+        RowFactory.create(102, ts, "A", RowFactory.create("X", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("x"))),
+        RowFactory.create(103, ts, "A", RowFactory.create("X", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("x"))),
+        RowFactory.create(104, ts, "A", RowFactory.create("X", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("x"))),
+        RowFactory.create(105, ts, "A", RowFactory.create("X", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("x"))),
+        RowFactory.create(201, ts, "A", RowFactory.create("Y", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("y"))),
+        RowFactory.create(202, ts, "A", RowFactory.create("Y", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("y"))),
+        RowFactory.create(203, ts, "A", RowFactory.create("Y", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("y"))),
+        RowFactory.create(204, ts, "A", RowFactory.create("Y", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("y"))),
+        RowFactory.create(205, ts, "A", RowFactory.create("Y", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("y"))),
+        RowFactory.create(301, ts, "A", RowFactory.create("Z", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("z")))
+    );
+
+    spark.createDataFrame(rows, SCHEMA)
+        .select("*")
+        .write()
+        .format("iceberg.adobe")
+        .mode("append")
+        .save(getTableLocation());
+
+    List<Row> thirdBatchRows = Lists.newArrayList(
+        RowFactory.create(301, ts, "B", RowFactory.create("Z", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("z"))),
+        RowFactory.create(302, ts, "B", RowFactory.create("Z", Collections.emptyMap()),
+            RowFactory.create(RowFactory.create("z")))
+    );
+
+    // Write the data and add new tombstones for X and Y
+    spark.createDataFrame(thirdBatchRows, SCHEMA)
+        .select("*")
+        .write()
+        .format("iceberg.adobe")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "level_one.level_two.level_three")
+        .mode(SaveMode.Append)
+        .save(getTableLocation());
+
+    Dataset<Row> load = spark.read()
+        .format("iceberg.adobe")
+        .option("iceberg.extension.tombstone.col", "level_one.level_two.level_three")
+        .load(getTableLocation());
+    load.show(false);
+
+    Assert.assertEquals("Result rows should match all", 13, load.count());
+  }
 }

@@ -192,12 +192,12 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
   }
 
   private def pushPostScanTombstoneFilter(reader: DataSourceReader,
-                                          filters: Seq[Expression], relation: DataSourceV2Relation): Option[Expression] = {
+                filters: Seq[Expression], relation: DataSourceV2Relation): Option[Expression] = {
     reader match {
       case r: SupportsTombstoneFilters =>
         val tombstoneExpression = tombstoneSourceBatchIdExpression(relation, r)
         logInfo(s"TombstoneFilters: ${tombstoneExpression}")
-        Some(tombstoneExpression)
+        tombstoneExpression
       case _ => None
     }
   }
@@ -211,11 +211,14 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
     * @return  expression for tombstone field NOT-IN filtered on tombstone values
     */
   private def tombstoneSourceBatchIdExpression(relation: DataSourceV2Relation,
-                                               tombstoneReader: SupportsTombstoneFilters): Expression = {
+                tombstoneReader: SupportsTombstoneFilters): Option[Expression] = {
     // TODO: This is a case-insensitive check so works for acp_system_metadata case but should be checked properly
     val tombstoneFieldName = tombstoneReader.tombstoneField()
     val literals = tombstoneReader.tombstoneValues().toSeq
 
+    if (literals.isEmpty) {
+      return None
+    }
     if (!"".equals(tombstoneFieldName) && tombstoneFieldName.indexOf(".") > -1) {
       // nested struct field
       val rootParentFieldName = tombstoneFieldName.substring(0, tombstoneFieldName.indexOf("."))
@@ -227,15 +230,15 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
         schema.fields(schema.fieldIndex(rootParentFieldName)) != null,
         s"No such field ${rootParentFieldName} in schema : ${schema}")
 
-      Not(In(buildGetStructField(rootParentFieldAtt, schema.fields(schema.fieldIndex(rootParentFieldName)),
-        subFieldName), literals.map(Literal(_))))
+      Some(Not(In(buildGetStructField(rootParentFieldAtt, schema.fields(schema.fieldIndex(rootParentFieldName)),
+        subFieldName), literals.map(Literal(_)))))
 
     } else {
       // flat field
       val tombstoneAttMaybe = relation.output.find(a => a.name.equalsIgnoreCase(tombstoneFieldName))
       ValidationException.check(!tombstoneAttMaybe.isEmpty, s"Failed to find the tombstone field " +
         s"${tombstoneFieldName} in schema : ${relation.schema}")
-      Not(In(tombstoneAttMaybe.get, literals.map(Literal(_))))
+      Some(Not(In(tombstoneAttMaybe.get, literals.map(Literal(_)))))
     }
   }
 
@@ -335,8 +338,9 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
         relation, project, filters)
       val reader = relation.newReader()
       // `pushedFilters` will be pushed down and evaluated in the underlying data sources.
-      // `postScanFilters` need to be evaluated after the scan.
-      // `postScanFilters` and `pushedFilters` can overlap, e.g. the parquet row group filter.
+      // `postScanFilters` need to be evaluated after the scan. Includes tombstone filtering
+      //                  or any other post-scan row group filtering.
+      // `postScanFilters` and `pushedFilters` can overlap, e.g. the parquet row group filter
       val (pushedFilters, postScanFilters) = pushFilters(reader, normalizedFilters, relation)
       val output = pruneColumns(reader, relation, normalizedProjects ++ postScanFilters)
       logInfo(

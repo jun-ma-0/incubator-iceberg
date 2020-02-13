@@ -302,7 +302,7 @@ class Writer implements DataSourceWriter {
       if (spec.fields().isEmpty()) {
         return new UnpartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
       } else {
-        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
+        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, io.value(), targetFileSize, dsSchema);
       }
     }
 
@@ -513,10 +513,10 @@ class Writer implements DataSourceWriter {
         AppenderFactory<InternalRow> appenderFactory,
         WriterFactory.OutputFileFactory fileFactory,
         FileIO fileIo,
-        long targetFileSize) {
+        long targetFileSize,
+        Schema writeSchema) {
       super(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
-
-      this.key = new PartitionKey(spec);
+      this.key = new PartitionKey(spec, writeSchema);
     }
 
     @Override

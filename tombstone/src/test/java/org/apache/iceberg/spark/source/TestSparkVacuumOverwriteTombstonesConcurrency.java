@@ -22,20 +22,24 @@ package org.apache.iceberg.spark.source;
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.ExtendedTables;
 import com.adobe.platform.iceberg.extensions.SimpleRecord;
+import com.adobe.platform.iceberg.extensions.SparkVacuum;
 import com.adobe.platform.iceberg.extensions.WithSpark;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
-public class TestVacuumTombstones extends WithSpark {
+public class TestSparkVacuumOverwriteTombstonesConcurrency extends WithSpark {
 
   private static final Timestamp now = Timestamp.from(Instant.ofEpochSecond(1575381935L));
 
@@ -61,81 +65,59 @@ public class TestVacuumTombstones extends WithSpark {
       new SimpleRecord(18, now, "C", "b"),
       new SimpleRecord(18, now, "C", "c"));
 
+  private static final List<SimpleRecord> notTombstonedRows = Lists.newArrayList(
+      new SimpleRecord(11, now, "X", "x"),
+      new SimpleRecord(12, now, "X", "x"),
+      new SimpleRecord(13, now, "X", "x"),
+      new SimpleRecord(14, now, "Y", "y"),
+      new SimpleRecord(15, now, "Y", "y"),
+      new SimpleRecord(15, now, "Y", "y"));
+
+  @Rule
+  public ExpectedException exceptionRule = ExpectedException.none();
+
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {
-    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation,
-        ImmutableMap.of("extension.skip.inclusive.evaluation", "true")
-    );
+    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation, Collections.singletonMap(
+        "write.metadata.metrics.default",
+        "truncate(36)"));
   }
 
   @Test
-  public void testVacuumOnPartitionColumn() {
-    spark.createDataFrame(rows, SimpleRecord.class)
-        .select("id", "timestamp", "batch", "data")
-        .write()
-        .format("iceberg.adobe")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "A,B")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
-        .mode("append")
-        .save(getTableLocation());
+  public void testVacuumOnNonPartitionColumnWithConcurrentAdditionOfNoTombstoneRows() {
 
-    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
-    long readSnapshotId = table.currentSnapshot().snapshotId();
-
-    // Read all rows by applying tombstone filtering
-    // and write data by overwriting only the files that include tombstone rows.
-    spark.read()
-        .format("iceberg.adobe")
-        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
-        .option("snapshot-id", readSnapshotId)
-        .load(getTableLocation())
-        .write()
-        .mode(SaveMode.Overwrite)
-        .format("iceberg.adobe")
-        // This instructs the writer to use an overwrite commit of the files used by the reader
-        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
-        .option("snapshot-id", readSnapshotId)
-        .save(getTableLocation());
-
-    Dataset<Row> iceberg = spark.read().format("iceberg").load(getTableLocation());
-    iceberg.show(false);
-    Assert.assertEquals("Result rows should match 3", 3, iceberg.count());
-  }
-
-  @Test
-  public void testVacuumOnNonPartitionColumn() {
     spark.createDataFrame(rows, SimpleRecord.class)
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "a,b,c")
         .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
-    long snapshotId = table.currentSnapshot().snapshotId();
+    ExtendedTable extendedTable = tables.loadWithTombstoneExtension(getTableLocation());
 
-    spark.read()
-        .format("iceberg.adobe")
-        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
-        .option("snapshot-id", snapshotId)
-        .load(getTableLocation())
+    // Load data for vacuum
+    SparkVacuum sparkVacuum = new SparkVacuum(spark, extendedTable, "data")
+        .load(100);
+
+    // Add more data using columns NOT marked for tombstone
+    spark.createDataFrame(notTombstonedRows, SimpleRecord.class)
+        .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
-        .mode(SaveMode.Overwrite)
-        .option(TombstoneExtension.TOMBSTONE_VACUUM, "")
-        .option(TombstoneExtension.TOMBSTONE_COLUMN, "data")
-        .option("snapshot-id", snapshotId)
+        .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    Dataset<Row> iceberg = spark.read().format("iceberg").load(getTableLocation());
-    iceberg.show(false);
-    Assert.assertEquals("Result rows should match 3", 3, iceberg.count());
+    // Vacuum tombstone rows
+    sparkVacuum.reduceWithAntiJoin();
+
+    Dataset<Row> iceberg = sparkWithTombstonesExtension.read()
+        .format("iceberg.adobe").option(TombstoneExtension.TOMBSTONE_COLUMN, "data").load(getTableLocation());
+    Assert.assertEquals("Result rows should match 6 rows, only `data` IN (x,y)", 6, iceberg.count());
+
+    List<SimpleRecord> simpleRecords = iceberg.as(Encoders.bean(SimpleRecord.class)).collectAsList();
+    Assert.assertEquals(notTombstonedRows, simpleRecords);
   }
 }

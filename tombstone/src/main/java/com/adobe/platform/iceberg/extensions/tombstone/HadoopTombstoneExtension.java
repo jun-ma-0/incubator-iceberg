@@ -90,6 +90,22 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
     }
   }
 
+  @Override
+  public OutputFile removeById(Snapshot snapshot, List<String> entries, Namespace namespace) {
+    List<Tombstone> current = load(snapshot);
+    OutputFile outputFile = newTombstonesFile(ops.current());
+    try {
+      List<Tombstone> filtered =
+          current.stream().filter(tombstone -> !entries.contains(tombstone.getId())).collect(Collectors.toList());
+      new Tombstones(this.conf).write(filtered, outputFile.location());
+      return outputFile;
+    } catch (IOException e) {
+      throw new RuntimeIOException(e, "Failed to write tombstones to file: %s", outputFile.location());
+    } catch (URISyntaxException e) {
+      throw new RuntimeException(String.format("Failed to write tombstones to file: %s", outputFile.location()), e);
+    }
+  }
+
   /**
    * {@inheritDoc}
    */

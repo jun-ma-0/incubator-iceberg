@@ -70,6 +70,16 @@ public interface TombstoneExtension {
   OutputFile remove(Snapshot snapshot, List<EvictEntry> entries, Namespace namespace);
 
   /**
+   * Removes all provided tombstones entries by id and namespace and writes result into new file.
+   *
+   * @param snapshot the table snapshot
+   * @param entries tombstone entry with associated eviction timestamps
+   * @param namespace the namespace used to append the tombstones to
+   * @return instance of {@link OutputFile} that has the appropriate tombstone entries
+   */
+  OutputFile removeById(Snapshot snapshot, List<String> entries, Namespace namespace);
+
+  /**
    * Copies the referenced tombstone file (where available) from the current snapshot to the new
    * snapshot along with appending the referenced files as an atomic commit operation.
    *

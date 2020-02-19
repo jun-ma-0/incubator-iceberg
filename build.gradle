@@ -380,6 +380,7 @@ project(':iceberg-tombstone') {
     testCompile project(path: ':iceberg-core', configuration: 'testArtifacts')
     testCompile project(path: ':iceberg-api', configuration: 'testArtifacts')
     testCompile("org.apache.spark:spark-sql_2.11")
+    testCompile group: 'org.apache.spark', name: 'spark-avro_2.11', version: '2.4.4'
   }
 }
 

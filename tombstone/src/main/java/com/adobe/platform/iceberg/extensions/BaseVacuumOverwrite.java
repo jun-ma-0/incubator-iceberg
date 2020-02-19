@@ -34,28 +34,42 @@ import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.OutputFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
+class BaseVacuumOverwrite extends BaseOverwriteFiles implements VacuumOverwrite, Serializable {
+  private static final Logger LOG = LoggerFactory.getLogger(BaseVacuumOverwrite.class);
 
   private Namespace namespace;
   private List<EvictEntry> toBeRemoved = null;
   private ExtendedTableOperations ops;
   private TombstoneExtension tombstoneExtension;
 
-  BaseVacuum(ExtendedTableOperations ops, TombstoneExtension tombstoneExtension) {
+  BaseVacuumOverwrite(ExtendedTableOperations ops, TombstoneExtension tombstoneExtension) {
     super(ops);
     this.ops = ops;
     this.tombstoneExtension = tombstoneExtension;
+    // Requires the file overwrite API to resolve files strictly on the provided expression
+    this.setStrictExpressionEvaluation();
   }
 
   @Override
   public List<ManifestFile> apply(TableMetadata base) {
     if (toBeRemoved != null && !toBeRemoved.isEmpty()) {
       OutputFile outputFile = tombstoneExtension
-          .remove(ops.current().currentSnapshot(), toBeRemoved, namespace);
+          .removeById(
+              ops.current().currentSnapshot(),
+              toBeRemoved.stream().map(evictEntry -> evictEntry.get().getKey().getId()).collect(Collectors.toList()),
+              namespace);
       // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
       // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
       this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, outputFile.location());
+      LOG.info(
+          "Create new tombstone file:{} after vacuum of tombstones:{} on snapshot: {} with location:{}",
+          outputFile.location(),
+          toBeRemoved.size(),
+          base.location(),
+          base.currentSnapshot().snapshotId());
     } else {
       // Assuming there are no tombstones to remove we fallback to referencing the tombstone file for new snapshot
       tombstoneExtension.copyReference(ops.current().currentSnapshot())
@@ -74,7 +88,11 @@ class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
    * @param readSnapshotId the snapshot id that was used to read the data
    */
   @SuppressWarnings("checkstyle:HiddenField")
-  public Vacuum tombstones(Namespace namespace, String columnName, List<EvictEntry> entries, Long readSnapshotId) {
+  public VacuumOverwrite tombstones(
+      Namespace namespace,
+      String columnName,
+      List<EvictEntry> entries,
+      Long readSnapshotId) {
     Preconditions.checkArgument(readSnapshotId > 0L, "Invalid read snapshot id, expected greater than 0 (zero)");
 
     this.namespace = namespace;
@@ -87,9 +105,11 @@ class BaseVacuum extends BaseOverwriteFiles implements Vacuum, Serializable {
     if (expression.isPresent()) {
       this.overwriteByRowFilter(expression.get());
       this.validateNoConflictingAppends(readSnapshotId, expression.get());
+      LOG.info("Vacuum tombstones={} on snapshotId={} for namespace={} and columnName={}", toBeRemoved.size(),
+          readSnapshotId, namespace, columnName);
       return this;
     }
 
-    throw new RuntimeIOException("Expected non-empty expression resulted from tombstone pruning");
+    throw new RuntimeIOException("Expected non-empty result for tombstone match any expression");
   }
 }

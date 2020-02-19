@@ -73,7 +73,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1579792561L)
         .commit();
 
-    List<SimpleRecord> actual = spark.read()
+    List<SimpleRecord> actual = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -130,7 +130,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "Z"),
         Collections.emptyMap(), 1579792561L).commit();
 
-    List<SimpleRecord> expectedWithoutTombstone = spark.read()
+    List<SimpleRecord> expectedWithoutTombstone = sparkWithTombstonesExtension.read()
         .format("iceberg")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -141,7 +141,7 @@ public class TestExtendedReader extends WithSpark {
 
     Assert.assertEquals("Rows must match original dataset size", 15, expectedWithoutTombstone.size());
 
-    List<SimpleRecord> tombstoneA = spark.read()
+    List<SimpleRecord> tombstoneA = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -156,7 +156,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "B"),
         Collections.emptyMap(), 1579792561L).commit();
 
-    List<SimpleRecord> tombstoneAB = spark.read()
+    List<SimpleRecord> tombstoneAB = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -171,7 +171,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "C"),
         Collections.emptyMap(), 1579792561L).commit();
 
-    List<SimpleRecord> tombstoneABC = spark.read()
+    List<SimpleRecord> tombstoneABC = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -186,7 +186,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "D"),
         Collections.emptyMap(), 1579792561L).commit();
 
-    List<SimpleRecord> tombstoneABCD = spark.read()
+    List<SimpleRecord> tombstoneABCD = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -237,7 +237,7 @@ public class TestExtendedReader extends WithSpark {
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "C"),
         Collections.emptyMap(), 1579792561L).commit();
 
-    long countAfterTombstone = spark.read()
+    long countAfterTombstone = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation())
@@ -247,28 +247,28 @@ public class TestExtendedReader extends WithSpark {
     // TODO - Fix https://jira.corp.adobe.com/browse/PLAT-43797 and update test
     Assert.assertEquals("Rows must match 12 (count all but `batch` A, B, C)", 12, countAfterTombstone);
 
-    Dataset<Row> verifySum = spark.read()
+    Dataset<Row> verifySum = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long sum = verifySum.agg(functions.sum(verifySum.col("id"))).collectAsList().get(0).getLong(0);
     Assert.assertEquals("Rows sum must match 120 (sum all but `batch` A, B, C)", 120, sum);
 
-    Dataset<Row> verifyMin = spark.read()
+    Dataset<Row> verifyMin = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long min = verifyMin.agg(functions.min(verifyMin.col("id"))).collectAsList().get(0).getInt(0);
     Assert.assertEquals("Rows min must match 5 (min but `batch` A, B, C and that's D)", 5, min);
 
-    Dataset<Row> verifyMax = spark.read()
+    Dataset<Row> verifyMax = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());
     long max = verifyMax.agg(functions.max(verifyMax.col("id"))).collectAsList().get(0).getInt(0);
     Assert.assertEquals("Rows max must match 15 (max but `batch` A, B, C and that's O)", 15, max);
 
-    Dataset<Row> verifyAvg = spark.read()
+    Dataset<Row> verifyAvg = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .load(getTableLocation());

@@ -110,6 +110,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   private StructType type = null; // cached because Spark accesses it multiple times
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
   private boolean bucketTasksByLocality;
+  private boolean parquetFilter = true;
 
   V1VectorizedReader(Table table, boolean caseSensitive, DataSourceOptions options,
       Configuration hadoopConf, int numRecordsPerBatch, SparkSession sparkSession) {
@@ -242,7 +243,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   public List<InputPartition<InternalRow>> planInputPartitions() {
     // if we are here, it means we cannot do vectorized reads
     // so just use the regular Reader.
-    Reader reader = new Reader(table, caseSensitive, options);
+    Reader reader = new Reader(table, caseSensitive, options, parquetFilter);
     reader.pushFilters(pushedFilters);
     reader.pruneColumns(requestedSchema);
 
@@ -280,6 +281,11 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
   // PLAT-41559 - added this to be able to overload the expressions used by Iceberg to build filters, i.e. tombstone
   void addFilter(Expression expression) {
     filterExpressions.add(expression);
+  }
+
+  // PLAT-41559 - added this to be able to override the parquet filter option
+  void setParquetFilter(boolean parquetFilter) {
+    this.parquetFilter = parquetFilter;
   }
 
   @Override
@@ -541,6 +547,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
 
     private transient Schema tableSchema = null;
     private transient Schema expectedSchema = null;
+    private boolean parquetFilter = true;
 
     private ReadTask(
         CombinedScanTask task, String tableSchemaString, String expectedSchemaString, FileIO fileIo,
@@ -553,7 +560,15 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
       this.encryptionManager = encryptionManager;
       this.caseSensitive = caseSensitive;
       this.buildReaderFunc = partitionFunction;
+    }
 
+    private ReadTask(
+        CombinedScanTask task, String tableSchemaString, String expectedSchemaString, FileIO fileIo,
+        EncryptionManager encryptionManager, boolean caseSensitive,
+        scala.Function1<PartitionedFile, scala.collection.Iterator<InternalRow>> partitionFunction,
+        boolean parquetFilter) {
+      this(task, tableSchemaString, expectedSchemaString, fileIo, encryptionManager, caseSensitive, partitionFunction);
+      this.parquetFilter = parquetFilter;
     }
 
     @Override
@@ -561,7 +576,7 @@ class V1VectorizedReader implements SupportsScanColumnarBatch,
 
       LOG.debug("Create Partition Reader");
       return new V1VectorizedTaskDataReader(task, lazyTableSchema(), lazyExpectedSchema(), fileIo,
-            encryptionManager, caseSensitive, buildReaderFunc);
+            encryptionManager, caseSensitive, buildReaderFunc, parquetFilter);
     }
 
     private Schema lazyTableSchema() {

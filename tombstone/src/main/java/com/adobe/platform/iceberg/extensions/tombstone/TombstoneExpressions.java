@@ -68,10 +68,10 @@ public class TombstoneExpressions implements Serializable {
     return Optional.empty();
   }
 
-  public static Optional<Expression> matchesAny(String field, List<String> entries) {
+  public static <T> Optional<Expression> matchesAny(String field, List<T> entries) {
     // TODO - revisit after merge of https://github.com/apache/incubator-iceberg/pull/357/files
     if (!entries.isEmpty()) {
-      List<UnboundPredicate<String>> registry =
+      List<UnboundPredicate<T>> registry =
           entries.stream()
               .map(t -> Expressions.equal(field, t))
               .collect(Collectors.toList());
@@ -82,12 +82,12 @@ public class TombstoneExpressions implements Serializable {
     return Optional.empty();
   }
 
-  private static Expression or(List<UnboundPredicate<String>> registry) {
+  private static <T> Expression or(List<UnboundPredicate<T>> registry) {
     if (registry.size() == 1) {
       return registry.get(0);
     } else if (registry.size() > 1) {
       Expression innerExpression = registry.get(0);
-      for (UnboundPredicate<String> stringUnboundPredicate : registry.subList(1, registry.size())) {
+      for (UnboundPredicate<T> stringUnboundPredicate : registry.subList(1, registry.size())) {
         innerExpression = Expressions.or(innerExpression, stringUnboundPredicate);
       }
       return innerExpression;

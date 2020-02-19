@@ -29,6 +29,7 @@ import java.io.Serializable;
 import java.util.AbstractMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.BaseTable;
@@ -40,6 +41,9 @@ import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.types.Types;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
 
 public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTableOperations,
     Serializable {
@@ -76,10 +80,10 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
   }
 
   @Override
-  public Vacuum newVacuumTombstones(
+  public VacuumOverwrite newVacuumTombstones(
       Map.Entry<String, Types.NestedField> column,
       List<ExtendedEntry> entries, Long readSnapshotId) {
-    return new BaseVacuum(ops, tombstoneExtension)
+    return new BaseVacuumOverwrite(ops, tombstoneExtension)
         .tombstones(namespaceOf(column.getValue()), column.getKey(),
             entries.stream()
                 .map(e -> (EvictEntry) () -> new AbstractMap.SimpleEntry<>(e.getEntry(), e.getEvictTimestamp()))
@@ -148,6 +152,51 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
         column.fieldId(),
         column.name());
     return tombstoneExtension.get(snapshot, namespaceOf(field));
+  }
+
+  @Override
+  public Optional<Dataset<Row>> getSnapshotTombstonesDataset(String columnName, Long snapshotId,
+      SparkSession sparkSession) {
+    Types.NestedField column = this.schema().findField(columnName);
+    Preconditions.checkArgument(
+        column != null,
+        "Unable to find column with name: (%s)",
+        columnName);
+    Snapshot snapshot = this.snapshot(snapshotId);
+    Preconditions.checkArgument(
+        snapshot != null,
+        "Unable to find snapshot with id: (%d)",
+        snapshotId);
+    Optional<String> tombstoneFilePathProperty =
+        Optional.ofNullable(snapshot.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));
+    return tombstoneFilePathProperty.map(s ->
+        sparkSession.read()
+            .format("avro")
+            .load(s)
+            .filter(String.format("namespace = '%s'", column.fieldId())));
+  }
+
+  @Override
+  public Optional<Dataset<Row>> getSnapshotTombstonesDataset(String columnName, Long snapshotId,
+      SparkSession sparkSession, int limit) {
+    Types.NestedField column = this.schema().findField(columnName);
+    Preconditions.checkArgument(
+        column != null,
+        "Unable to find column with name: (%s)",
+        columnName);
+    Snapshot snapshot = this.snapshot(snapshotId);
+    Preconditions.checkArgument(
+        snapshot != null,
+        "Unable to find snapshot with id: (%d)",
+        snapshotId);
+    Optional<String> tombstoneFilePathProperty =
+        Optional.ofNullable(snapshot.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));
+    return tombstoneFilePathProperty.map(s ->
+        sparkSession.read()
+            .format("avro")
+            .load(s)
+            .filter(String.format("namespace = '%s'", column.fieldId()))
+            .limit(limit));
   }
 
   @Override

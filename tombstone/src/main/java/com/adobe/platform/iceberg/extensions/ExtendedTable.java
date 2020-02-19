@@ -25,9 +25,13 @@ import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.types.Types;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
 
 public interface ExtendedTable extends Table, Serializable {
 
@@ -66,14 +70,38 @@ public interface ExtendedTable extends Table, Serializable {
   List<ExtendedEntry> getSnapshotTombstones(Types.NestedField column, Snapshot snapshot);
 
   /**
-   * Create a new {@link Vacuum API} to replace files after removing tombstones from this table.
+   * Retrieves a dataset with the tombstones from this table's specific snapshot for the indicated schema
+   * column.
+   *
+   * @param columnName a column name that must be part of the schema
+   * @param snapshotId a specific snapshot
+   * @param sparkSession spark session to create the dataset
+   * @return a dataset of tombstones stored for the specific column
+   */
+  Optional<Dataset<Row>> getSnapshotTombstonesDataset(String columnName, Long snapshotId, SparkSession sparkSession);
+
+  /**
+   * Retrieves a dataset with the tombstones from this table's specific snapshot for the indicated schema
+   * column.
+   *
+   * @param columnName a column name that must be part of the schema
+   * @param snapshotId a specific snapshot
+   * @param sparkSession spark session to create the dataset
+   * @param limit limit the number of tombstones we return in the dataset
+   * @return a dataset of tombstones stored for the specific column
+   */
+  Optional<Dataset<Row>> getSnapshotTombstonesDataset(String columnName, Long snapshotId, SparkSession sparkSession,
+      int limit);
+
+  /**
+   * Create a new {@link VacuumOverwrite API} to replace files after removing tombstones from this table.
    *
    * @param column a map entry using the full column name as key and the nested field as value
    * @param entries tombstone entries associated for the rows that will be deleted from data files
    * @param readSnapshotId the read snapshot id
-   * @return a new {@link Vacuum}
+   * @return a new {@link VacuumOverwrite}
    */
-  Vacuum newVacuumTombstones(
+  VacuumOverwrite newVacuumTombstones(
       Map.Entry<String, Types.NestedField> column, List<ExtendedEntry> entries,
       Long readSnapshotId);
 

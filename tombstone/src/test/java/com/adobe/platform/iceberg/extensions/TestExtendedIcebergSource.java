@@ -41,7 +41,7 @@ public class TestExtendedIcebergSource extends WithSpark implements WithExecutor
     exceptionRule.expect(TombstoneValidationException.class);
     exceptionRule.expectMessage("Expect tombstone column option=iceberg.extension.tombstone.col");
 
-    spark.read()
+    sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .load(getTableLocation())
         .select("*")
@@ -57,7 +57,7 @@ public class TestExtendedIcebergSource extends WithSpark implements WithExecutor
         new SimpleRecord(2, now, "A", "b"),
         new SimpleRecord(3, now, "A", "c"));
 
-    spark.createDataFrame(rows, SimpleRecord.class)
+    sparkWithTombstonesExtension.createDataFrame(rows, SimpleRecord.class)
         .select("id", "timestamp", "batch", "data")
         .write()
         .format("iceberg.adobe")
@@ -69,7 +69,7 @@ public class TestExtendedIcebergSource extends WithSpark implements WithExecutor
     table.newAppendWithTombstonesAdd(batchField, Lists.newArrayList(() -> "A"), Collections.emptyMap(), 1L)
         .commit();
 
-    long tombstonesOn = spark.read()
+    long tombstonesOn = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.col", "batch")
         .load(getTableLocation())
@@ -77,7 +77,7 @@ public class TestExtendedIcebergSource extends WithSpark implements WithExecutor
         .count();
     Assert.assertEquals("Expect tombstone rows are filtered out", 0, tombstonesOn);
 
-    long tombstonesOff = spark.read()
+    long tombstonesOff = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.noop", "true")
         .load(getTableLocation())

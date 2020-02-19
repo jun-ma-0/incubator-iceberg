@@ -71,7 +71,9 @@ public class TestExtendedReaderNestedField extends WithSpark {
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {
     // Override implicit Iceberg table schema test provisioning with explicit schema and spec.
-    tables.create(ICEBERG_SCHEMA, SPEC, tableLocation);
+    tables.create(ICEBERG_SCHEMA, SPEC, tableLocation, Collections.singletonMap(
+        "write.metadata.metrics.default",
+        "truncate(36)"));
   }
 
   @Test
@@ -104,7 +106,7 @@ public class TestExtendedReaderNestedField extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    Dataset<Row> load = spark.read()
+    Dataset<Row> load = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
         .option("iceberg.read.enableV1VectorizedReader", "false")
@@ -115,7 +117,7 @@ public class TestExtendedReaderNestedField extends WithSpark {
     // Use 'batch' partition field for SQL projection and test count
     long selectByBatchCount = load.select("batch").count();
     Assert.assertEquals(String.format(
-        "Expect all but `_acp_system_metadata.acp_sourceBatchId` IN (A,B or C) got %d",
+        "Expect 3 rows with `_acp_system_metadata.acp_sourceBatchId` NOT IN (A,B or C) but got %d",
         selectByBatchCount), 3L, selectByBatchCount);
 
     // Use '_id' partition field for SQL projection and test aggregation functions

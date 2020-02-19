@@ -19,9 +19,13 @@
 
 package com.adobe.platform.iceberg.extensions;
 
+import java.util.Collections;
+
 public interface WithDefaultIcebergTable {
 
   default void implicitTable(ExtendedTables tables, String tableLocation) {
-    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation);
+    tables.create(SimpleRecord.schema, SimpleRecord.spec, tableLocation, Collections.singletonMap(
+        "write.metadata.metrics.default",
+        "truncate(36)"));
   }
 }

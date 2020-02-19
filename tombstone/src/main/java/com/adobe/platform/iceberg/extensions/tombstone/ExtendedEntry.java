@@ -31,8 +31,14 @@ import org.apache.spark.annotation.InterfaceStability;
 public interface ExtendedEntry extends Serializable {
 
   class Builder {
+    // Utility classes should not have a public or default constructor. [HideUtilityClassConstructor]
+    private Builder() {}
 
-    public ExtendedEntry withEmptyProperties(Entry entry) {
+    public static ExtendedEntry withId(String entry) {
+      return Builder.withEmptyProperties(() -> entry);
+    }
+
+    public static ExtendedEntry withEmptyProperties(Entry entry) {
       return new ExtendedEntry() {
         @Override
         public Entry getEntry() {

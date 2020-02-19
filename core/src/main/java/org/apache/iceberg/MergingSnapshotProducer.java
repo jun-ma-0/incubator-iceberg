@@ -91,6 +91,8 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   private ManifestFile cachedNewManifest = null;
   private boolean hasNewFiles = false;
   private boolean filterUpdated = false; // used to clear caches of filtered and merged manifests
+  private boolean isStrictExpressionEvaluation = false; // used to set strict expression based file evaluation
+  private Set<CharSequenceWrapper> deltaAddedFiles = Sets.newHashSet();
 
   MergingSnapshotProducer(TableOperations ops) {
     super(ops);
@@ -129,6 +131,18 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
 
   protected void failMissingDeletePaths() {
     this.failMissingDeletePaths = true;
+  }
+
+  protected void setStrictExpressionEvaluation() {
+    this.isStrictExpressionEvaluation = true;
+  }
+
+  protected boolean isStrictExpressionEvaluation() {
+    return this.isStrictExpressionEvaluation;
+  }
+
+  protected void setDeltaAddedFiles(Set<CharSequenceWrapper> deltaAddedFiles) {
+    this.deltaAddedFiles = deltaAddedFiles;
   }
 
   /**
@@ -207,9 +221,6 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       this.filterUpdated = false;
     }
 
-    Boolean skipInclusiveEvaluation =
-        Boolean.valueOf(base.properties().getOrDefault("extension.skip.inclusive.evaluation", "false"));
-
     Snapshot current = base.currentSnapshot();
     Map<Integer, List<ManifestFile>> groups = Maps.newTreeMap(Comparator.<Integer>reverseOrder());
 
@@ -235,7 +246,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       List<ManifestFile> filtered;
       if (current != null) {
         List<ManifestFile> manifests = current.manifests();
-        filtered = Arrays.asList(filterManifests(metricsEvaluator, manifests, skipInclusiveEvaluation));
+        filtered = Arrays.asList(filterManifests(metricsEvaluator, manifests, isStrictExpressionEvaluation));
       } else {
         filtered = ImmutableList.of();
       }
@@ -246,6 +257,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
           manifest -> manifest.hasAddedFiles() || manifest.hasExistingFiles() || manifest.snapshotId() == snapshotId());
 
       Set<CharSequenceWrapper> deletedFiles = deletedFiles(unmergedManifests);
+      deletedFiles.removeAll(deltaAddedFiles); // assumes new files matching the expression are false positives
 
       List<ManifestFile> manifests = Lists.newArrayList();
       if (mergeEnabled) {
@@ -272,10 +284,11 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     }
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
   private ManifestFile[] filterManifests(
       StrictMetricsEvaluator metricsEvaluator,
       List<ManifestFile> manifests,
-      Boolean skipInclusiveEvaluation)
+      Boolean isStrictExpressionEvaluation)
       throws IOException {
     ManifestFile[] filtered = new ManifestFile[manifests.size()];
     // open all of the manifest files in parallel, use index to avoid reordering
@@ -283,7 +296,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
         .stopOnFailure().throwFailureWhenFinished()
         .executeWith(ThreadPools.getWorkerPool())
         .run(index -> {
-          ManifestFile manifest = filterManifest(metricsEvaluator, manifests.get(index), skipInclusiveEvaluation);
+          ManifestFile manifest = filterManifest(metricsEvaluator, manifests.get(index), isStrictExpressionEvaluation);
           filtered[index] = manifest;
         }, IOException.class);
     return filtered;
@@ -415,9 +428,10 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   /**
    * @return a ManifestReader that is a filtered version of the input manifest.
    */
+  @SuppressWarnings("checkstyle:HiddenField")
   private ManifestFile filterManifest(
       StrictMetricsEvaluator metricsEvaluator,
-      ManifestFile manifest, Boolean skipInclusiveEvaluation)
+      ManifestFile manifest, Boolean isStrictExpressionEvaluation)
       throws IOException {
     ManifestFile cached = filteredManifests.get(manifest);
     if (cached != null) {
@@ -443,7 +457,12 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       // manifest without copying data. if a manifest does have a file to remove, this will break
       // out of the loop and move on to filtering the manifest.
       boolean hasDeletedFiles =
-          manifestHasDeletedFiles(metricsEvaluator, reader, pathWrapper, partitionWrapper, skipInclusiveEvaluation);
+          manifestHasDeletedFiles(
+              metricsEvaluator,
+              reader,
+              pathWrapper,
+              partitionWrapper,
+              isStrictExpressionEvaluation);
 
       if (!hasDeletedFiles) {
         filteredManifests.put(manifest, manifest);
@@ -451,13 +470,14 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       }
 
       return filterManifestWithDeletedFiles(metricsEvaluator, manifest, reader, pathWrapper,
-          partitionWrapper, skipInclusiveEvaluation);
+          partitionWrapper, isStrictExpressionEvaluation);
     }
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
   private boolean manifestHasDeletedFiles(
       StrictMetricsEvaluator metricsEvaluator, ManifestReader reader,
-      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation) {
+      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean isStrictExpressionEvaluation) {
     Evaluator inclusive = extractInclusiveDeleteExpression(reader);
     Evaluator strict = extractStrictDeleteExpression(reader);
     boolean hasDeletedFiles = false;
@@ -466,7 +486,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       boolean fileDelete = deletePaths.contains(pathWrapper.set(file.path())) ||
           dropPartitions.contains(partitionWrapper.set(file.partition()));
       if (fileDelete || inclusive.eval(file.partition())) {
-        if (!skipInclusiveEvaluation) {
+        if (!isStrictExpressionEvaluation) {
           ValidationException.check(
               fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
               "Cannot delete file where some, but not all, rows match filter %s: %s",
@@ -483,9 +503,10 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     return hasDeletedFiles;
   }
 
+  @SuppressWarnings("checkstyle:HiddenField")
   private ManifestFile filterManifestWithDeletedFiles(
       StrictMetricsEvaluator metricsEvaluator, ManifestFile manifest, ManifestReader reader,
-      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean skipInclusiveEvaluation)
+      CharSequenceWrapper pathWrapper, StructLikeWrapper partitionWrapper, Boolean isStrictExpressionEvaluation)
       throws IOException {
     Evaluator inclusive = extractInclusiveDeleteExpression(reader);
     Evaluator strict = extractStrictDeleteExpression(reader);
@@ -495,35 +516,47 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     Set<CharSequenceWrapper> deletedPaths = Sets.newHashSet();
     OutputFile filteredCopy = manifestPath(manifestCount.getAndIncrement());
     ManifestWriter writer = new ManifestWriter(reader.spec(), filteredCopy, snapshotId());
+    // The context will be given the invariant details and run against the invariant arguments
+    final StrictExpressionEvaluator.Context context = StrictExpressionEvaluator
+        .builder()
+        .withManifest(manifest)
+        .withWriter(writer)
+        .withSummaryBuilder(summaryBuilder)
+        .withDeletedPaths(deletedPaths)
+        .withDeletedFiles(deletedFiles)
+        .context(isStrictExpressionEvaluation, reader, deleteExpression, deltaAddedFiles);
     try {
       reader.entries().forEach(entry -> {
         DataFile file = entry.file();
         boolean fileDelete = deletePaths.contains(pathWrapper.set(file.path())) ||
             dropPartitions.contains(partitionWrapper.set(file.partition()));
         if (entry.status() != Status.DELETED) {
-          if (fileDelete || inclusive.eval(file.partition())) {
-            if (!skipInclusiveEvaluation) {
+          if (isStrictExpressionEvaluation) {
+            // The evaluation will be given the invariant context and run against the invariant arguments
+            context.evaluate(fileDelete, file, entry);
+          } else {
+            if (fileDelete || inclusive.eval(file.partition())) {
               ValidationException.check(
                   fileDelete || strict.eval(file.partition()) || metricsEvaluator.eval(file),
                   "Cannot delete file where some, but not all, rows match filter %s: %s",
                   this.deleteExpression, file.path());
-            }
 
-            writer.delete(entry);
+              writer.delete(entry);
 
-            CharSequenceWrapper wrapper = CharSequenceWrapper.wrap(entry.file().path());
-            if (deletedPaths.contains(wrapper)) {
-              LOG.warn("Deleting a duplicate path from manifest {}: {}",
-                  manifest.path(), wrapper.get());
-              summaryBuilder.incrementDuplicateDeletes();
+              CharSequenceWrapper wrapper = CharSequenceWrapper.wrap(entry.file().path());
+              if (deletedPaths.contains(wrapper)) {
+                LOG.warn("Deleting a duplicate path from manifest {}: {}",
+                    manifest.path(), wrapper.get());
+                summaryBuilder.incrementDuplicateDeletes();
+              } else {
+                // only add the file to deletes if it is a new delete
+                // this keeps the snapshot summary accurate for non-duplicate data
+                deletedFiles.add(entry.file().copyWithoutStats());
+              }
+              deletedPaths.add(wrapper);
             } else {
-              // only add the file to deletes if it is a new delete
-              // this keeps the snapshot summary accurate for non-duplicate data
-              deletedFiles.add(entry.file().copyWithoutStats());
+              writer.existing(entry);
             }
-            deletedPaths.add(wrapper);
-          } else {
-            writer.existing(entry);
           }
         }
       });

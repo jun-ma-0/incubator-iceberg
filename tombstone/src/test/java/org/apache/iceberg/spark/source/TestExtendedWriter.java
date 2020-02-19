@@ -57,7 +57,7 @@ public class TestExtendedWriter extends WithSpark {
         .mode("append")
         .save(getTableLocation());
 
-    List<SimpleRecord> actual = spark.read()
+    List<SimpleRecord> actual = sparkWithTombstonesExtension.read()
         .option(TombstoneExtension.TOMBSTONE_COLUMN, "batch")
         .format("iceberg.adobe")
         .load(getTableLocation())

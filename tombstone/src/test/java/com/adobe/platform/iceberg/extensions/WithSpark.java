@@ -34,6 +34,7 @@ import org.junit.rules.TemporaryFolder;
 import scala.collection.JavaConverters;
 
 public class WithSpark implements WithDefaultIcebergTable {
+  public static SparkSession sparkWithTombstonesExtension;
   public static SparkSession spark;
   public final HadoopExtendedTables tables = new HadoopExtendedTables(new Configuration());
 
@@ -45,23 +46,26 @@ public class WithSpark implements WithDefaultIcebergTable {
 
   @BeforeClass
   public static void startSpark() {
-    WithSpark.spark = SparkSession.builder()
+    sparkWithTombstonesExtension = SparkSession.builder()
         .master("local[2]")
         .getOrCreate();
 
-    // enable Adobe pruning and filtering strategy
-    if (WithSpark.spark != null) {
+    spark = sparkWithTombstonesExtension.newSession();
+
+    if (sparkWithTombstonesExtension != null) {
       List<SparkStrategy> extra = new ArrayList<>();
       extra.add(DataSourceV2StrategyWithAdobeFilteringAndPruning$.MODULE$);
-      WithSpark.spark.experimental().extraStrategies_$eq(
+      sparkWithTombstonesExtension.experimental().extraStrategies_$eq(
           JavaConverters.asScalaBufferConverter(extra).asScala().toSeq());
     }
   }
 
   @AfterClass
   public static void stopSpark() {
-    WithSpark.spark.stop();
-    WithSpark.spark = null;
+    sparkWithTombstonesExtension.stop();
+    sparkWithTombstonesExtension = null;
+    spark.stop();
+    spark = null;
   }
 
   public File getTableDir() {

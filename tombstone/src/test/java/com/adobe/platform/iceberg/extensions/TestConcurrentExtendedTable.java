@@ -45,7 +45,8 @@ public class TestConcurrentExtendedTable extends WithSpark implements WithExecut
             "commit.retry.num-retries", "100",
             "commit.retry.min-wait-ms", "3000", // 3 seconds
             "commit.retry.max-wait-ms", "10000", // 10 seconds
-            "commit.retry.total-timeout-ms", "180000")); // 3 minutes
+            "commit.retry.total-timeout-ms", "180000",
+            "write.metadata.metrics.default", "truncate(36)")); // 3 minutes
   }
 
   /**

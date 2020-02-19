@@ -74,7 +74,9 @@ public class TestExtendedWriterNestedField extends WithSpark {
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {
     // Override implicit Iceberg table schema test provisioning with explicit schema and spec.
-    tables.create(ICEBERG_SCHEMA, SPEC, tableLocation);
+    tables.create(ICEBERG_SCHEMA, SPEC, tableLocation, Collections.singletonMap(
+        "write.metadata.metrics.default",
+        "truncate(36)"));
   }
 
   @Test
@@ -131,7 +133,7 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    Dataset<Row> load = spark.read()
+    Dataset<Row> load = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.col", "_acp_system_metadata.acp_sourceBatchId")
         .load(getTableLocation());
@@ -195,7 +197,7 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    Dataset<Row> load = spark.read()
+    Dataset<Row> load = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.col", "level_one.level_two.level_three")
         .load(getTableLocation());
@@ -257,7 +259,7 @@ public class TestExtendedWriterNestedField extends WithSpark {
         .mode(SaveMode.Append)
         .save(getTableLocation());
 
-    Dataset<Row> load = spark.read()
+    Dataset<Row> load = sparkWithTombstonesExtension.read()
         .format("iceberg.adobe")
         .option("iceberg.extension.tombstone.col", "level_one.level_two.level_three")
         .load(getTableLocation());

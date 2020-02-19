@@ -32,19 +32,18 @@ public class TombstoneExpressionsTest {
   @Test
   public void notIn() {
     List<ExtendedEntry> tbs = Lists.newArrayList(
-        new ExtendedEntry.Builder().withEmptyProperties(() -> "a"),
-        new ExtendedEntry.Builder().withEmptyProperties(() -> "b"),
-        new ExtendedEntry.Builder().withEmptyProperties(() -> "c"),
-        new ExtendedEntry.Builder().withEmptyProperties(() -> "d")
+        ExtendedEntry.Builder.withEmptyProperties(() -> "a"),
+        ExtendedEntry.Builder.withEmptyProperties(() -> "b"),
+        ExtendedEntry.Builder.withEmptyProperties(() -> "c"),
+        ExtendedEntry.Builder.withEmptyProperties(() -> "d")
     );
 
     Optional<Expression> optExp = TombstoneExpressions.notIn("fld", tbs);
     Assert.assertTrue(optExp.isPresent());
-    Expression exp = optExp.get();
     Assert.assertEquals("(((ref(name=\"fld\") != \"a\" and ref(name=\"fld\") != \"b\") " +
-        "and ref(name=\"fld\") != \"c\") and ref(name=\"fld\") != \"d\")", exp.toString());
+        "and ref(name=\"fld\") != \"c\") and ref(name=\"fld\") != \"d\")", optExp.get().toString());
 
-    Optional<Expression> optExp2 = TombstoneExpressions.notIn("fld", new ArrayList<ExtendedEntry>());
+    Optional<Expression> optExp2 = TombstoneExpressions.notIn("fld", new ArrayList<>());
     Assert.assertFalse(optExp2.isPresent());
   }
 
@@ -53,9 +52,8 @@ public class TombstoneExpressionsTest {
     Optional<Expression> optExp = TombstoneExpressions.matchesAny("fld2",
         Lists.newArrayList("m", "n", "o", "p"));
     Assert.assertTrue(optExp.isPresent());
-    Expression exp = optExp.get();
     Assert.assertEquals("(((ref(name=\"fld2\") == \"m\" or ref(name=\"fld2\") == \"n\") " +
-        "or ref(name=\"fld2\") == \"o\") or ref(name=\"fld2\") == \"p\")", exp.toString());
+        "or ref(name=\"fld2\") == \"o\") or ref(name=\"fld2\") == \"p\")", optExp.get().toString());
     Optional<Expression> optExp2 = TombstoneExpressions.matchesAny("fld", new ArrayList<String>());
     Assert.assertFalse(optExp2.isPresent());
   }

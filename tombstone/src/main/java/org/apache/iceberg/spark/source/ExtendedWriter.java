@@ -20,18 +20,20 @@
 package org.apache.iceberg.spark.source;
 
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
-import com.adobe.platform.iceberg.extensions.Vacuum;
+import com.adobe.platform.iceberg.extensions.VacuumOverwrite;
 import com.adobe.platform.iceberg.extensions.tombstone.Entry;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneValidationException;
 import com.google.common.collect.ImmutableList;
 import java.util.AbstractMap.SimpleEntry;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DataFile;
@@ -41,8 +43,11 @@ import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;
 import org.apache.spark.sql.sources.v2.writer.WriterCommitMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ExtendedWriter extends Writer {
+  private static final Logger LOG = LoggerFactory.getLogger(ExtendedWriter.class);
 
   private ExtendedTable table;
   // private List<Entry> tombstones = new ArrayList<>();
@@ -60,7 +65,7 @@ public class ExtendedWriter extends Writer {
     super(table, options, replacePartitions, applicationId, wapId, dsSchema);
     this.table = table;
     this.options = options;
-    this.isVacuum = options.get(TombstoneExtension.TOMBSTONE_VACUUM).isPresent();
+    this.isVacuum = options.getBoolean(TombstoneExtension.TOMBSTONE_VACUUM, false);
   }
 
   @Override
@@ -68,7 +73,13 @@ public class ExtendedWriter extends Writer {
     if (isVacuum) {
       Map.Entry<String, Types.NestedField> column = tombstoneColumn(options);
       long readSnapshotId = options.getLong("snapshot-id", 0L);
-      List<ExtendedEntry> tombstones = table.getSnapshotTombstones(column.getValue(), table.snapshot(readSnapshotId));
+      Optional<String> overrideTombstones = options.get(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST);
+      List<ExtendedEntry> tombstones = overrideTombstones.map(s -> Arrays.stream(s.split(","))
+          .map(entry -> ExtendedEntry.Builder.withEmptyProperties(() -> entry)).collect(Collectors.toList()))
+          .orElseGet(() -> table.getSnapshotTombstones(column.getValue(), table.snapshot(readSnapshotId)));
+      LOG.info("Vacuum commit tombstones count={} with values={} on snapshotId={} and table={}", tombstones.size(),
+          tombstones.stream().map(extendedEntry -> extendedEntry.getEntry().getId()).collect(Collectors.joining(",")),
+          table.currentSnapshot().snapshotId(), table.location());
       vacuum(messages, tombstones, column, readSnapshotId);
     } else {
       List<Entry> tombstones = tombstoneValues(options);
@@ -116,15 +127,17 @@ public class ExtendedWriter extends Writer {
   private void vacuum(
       WriterCommitMessage[] messages, List<ExtendedEntry> entries,
       Map.Entry<String, Types.NestedField> column, Long readSnapshotId) {
-    Vacuum vacuum = table.newVacuumTombstones(column, entries, readSnapshotId);
+    VacuumOverwrite vacuumOverwrite = table.newVacuumTombstones(column, entries, readSnapshotId);
 
     int numFiles = 0;
     for (DataFile file : files(messages)) {
       numFiles += 1;
-      vacuum.addFile(file);
+      vacuumOverwrite.addFile(file);
     }
 
-    commitOperation(vacuum, numFiles, "vacuumTombstones");
+    LOG.info("Vacuum commit added files={} on snapshotId={} for table={}", numFiles,
+        table.currentSnapshot().snapshotId(), table.location());
+    commitOperation(vacuumOverwrite, numFiles, "vacuumTombstones");
   }
 
   private void appendWithTombstones(

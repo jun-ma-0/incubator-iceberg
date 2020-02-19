@@ -23,12 +23,14 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Evaluator;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.InclusiveMetricsEvaluator;
 import org.apache.iceberg.expressions.Projections;
 import org.apache.iceberg.expressions.StrictMetricsEvaluator;
+import org.apache.iceberg.util.CharSequenceWrapper;
 
 public class BaseOverwriteFiles extends MergingSnapshotProducer<OverwriteFiles> implements OverwriteFiles {
   private boolean validateAddedFilesMatchOverwriteFilter = false;
@@ -84,7 +86,9 @@ public class BaseOverwriteFiles extends MergingSnapshotProducer<OverwriteFiles> 
 
   @Override
   public List<ManifestFile> apply(TableMetadata base) {
-    if (validateAddedFilesMatchOverwriteFilter) {
+    // added files are false positives in the use-case of adding source batch tombstones and they only occur
+    // because we're matching against a range of discrete UUID values which is considered a false positive
+    if (validateAddedFilesMatchOverwriteFilter && !isStrictExpressionEvaluation()) {
       PartitionSpec spec = writeSpec();
       Expression rowFilter = rowFilter();
 
@@ -110,18 +114,24 @@ public class BaseOverwriteFiles extends MergingSnapshotProducer<OverwriteFiles> 
     }
 
     if (conflictDetectionFilter != null) {
-      PartitionSpec spec = writeSpec();
-      Expression inclusiveExpr = Projections.inclusive(spec).project(conflictDetectionFilter);
-      Evaluator inclusive = new Evaluator(spec.partitionType(), inclusiveExpr);
+      if (isStrictExpressionEvaluation()) {
+        // This is the list of files that match the provided expression which have shown up in-between snapshots
+        this.setDeltaAddedFiles(collectNewFiles(base).stream()
+            .map(dataFile -> CharSequenceWrapper.wrap(dataFile.path())).collect(Collectors.toSet()));
+      } else {
+        PartitionSpec spec = writeSpec();
+        Expression inclusiveExpr = Projections.inclusive(spec).project(conflictDetectionFilter);
+        Evaluator inclusive = new Evaluator(spec.partitionType(), inclusiveExpr);
 
-      InclusiveMetricsEvaluator metrics = new InclusiveMetricsEvaluator(base.schema(), conflictDetectionFilter);
+        InclusiveMetricsEvaluator metrics = new InclusiveMetricsEvaluator(base.schema(), conflictDetectionFilter);
 
-      List<DataFile> newFiles = collectNewFiles(base);
-      for (DataFile newFile : newFiles) {
-        ValidationException.check(
-            !inclusive.eval(newFile.partition()) || !metrics.eval(newFile),
-            "A file was appended that might contain data matching filter '%s': %s",
-            conflictDetectionFilter, newFile.path());
+        List<DataFile> newFiles = collectNewFiles(base);
+        for (DataFile newFile : newFiles) {
+          ValidationException.check(
+              !inclusive.eval(newFile.partition()) || !metrics.eval(newFile),
+              "A file was appended that might contain data matching filter '%s': %s",
+              conflictDetectionFilter, newFile.path());
+        }
       }
     }
 

@@ -52,6 +52,7 @@ import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Expression;
+import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
@@ -116,6 +117,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   private Schema schema = null;
   private StructType type = null; // cached because Spark accesses it multiple times
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
+  private boolean parquetFilter = true;
 
   Reader(Table table, boolean caseSensitive, DataSourceOptions options) {
     this.table = table;
@@ -135,6 +137,11 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     this.fileIo = table.io();
     this.encryptionManager = table.encryption();
     this.caseSensitive = caseSensitive;
+  }
+
+  Reader(Table table, boolean caseSensitive, DataSourceOptions options, boolean parquetFilter) {
+    this(table, caseSensitive, options);
+    this.parquetFilter = parquetFilter;
   }
 
   private Schema lazySchema() {
@@ -180,7 +187,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
       String expectedSchemaString, FileIO fileIo, EncryptionManager encryptionManager,
       boolean caseSensitive) {
     return new ReadTask(task, tableSchemaString, expectedSchemaString, fileIo, encryptionManager,
-        caseSensitive);
+        caseSensitive, parquetFilter);
   }
 
   @Override
@@ -214,6 +221,11 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   // PLAT-41559 - added this to be able to overload the expressions used by Iceberg to build filters, i.e. tombstone
   void addFilter(Expression expression) {
     filterExpressions.add(expression);
+  }
+
+  // PLAT-41559 - added this to be able to override the parquet filter option
+  void setParquetFilter(boolean parquetFilter) {
+    this.parquetFilter = parquetFilter;
   }
 
   @Override
@@ -303,25 +315,27 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     private final FileIO fileIo;
     private final EncryptionManager encryptionManager;
     private final boolean caseSensitive;
+    private boolean parquetFilter = true;
 
     private transient Schema tableSchema = null;
     private transient Schema expectedSchema = null;
 
     private ReadTask(
         CombinedScanTask task, String tableSchemaString, String expectedSchemaString, FileIO fileIo,
-        EncryptionManager encryptionManager, boolean caseSensitive) {
+        EncryptionManager encryptionManager, boolean caseSensitive, boolean parquetFilter) {
       this.task = task;
       this.tableSchemaString = tableSchemaString;
       this.expectedSchemaString = expectedSchemaString;
       this.fileIo = fileIo;
       this.encryptionManager = encryptionManager;
       this.caseSensitive = caseSensitive;
+      this.parquetFilter = parquetFilter;
     }
 
     @Override
     public InputPartitionReader<InternalRow> createPartitionReader() {
       return new TaskDataReader(task, lazyTableSchema(), lazyExpectedSchema(), fileIo,
-          encryptionManager, caseSensitive);
+          encryptionManager, caseSensitive, parquetFilter);
     }
 
     private Schema lazyTableSchema() {
@@ -356,9 +370,10 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     private Iterator<InternalRow> currentIterator = null;
     private Closeable currentCloseable = null;
     private InternalRow current = null;
+    private boolean parquetFilter;
 
     TaskDataReader(CombinedScanTask task, Schema tableSchema, Schema expectedSchema, FileIO fileIo,
-        EncryptionManager encryptionManager, boolean caseSensitive) {
+        EncryptionManager encryptionManager, boolean caseSensitive, boolean parquetFilter) {
       this.fileIo = fileIo;
       this.tasks = task.files().iterator();
       this.tableSchema = tableSchema;
@@ -375,6 +390,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
       // open last because the schemas and fileIo must be set
       this.currentIterator = open(tasks.next());
       this.caseSensitive = caseSensitive;
+      this.parquetFilter = parquetFilter;
     }
 
     private static UnsafeProjection projection(Schema finalSchema, Schema readSchema) {
@@ -527,7 +543,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
           .build();
     }
 
-    private CloseableIterable<InternalRow> newParquetIterable(InputFile location,
+    protected CloseableIterable<InternalRow> newParquetIterable(InputFile location,
         FileScanTask task,
         Schema readSchema) {
       return Parquet.read(location)
@@ -535,7 +551,7 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
           .split(task.start(), task.length())
           .createReaderFunc(fileSchema -> SparkParquetReaders.buildReader(readSchema, fileSchema))
           .filterRecords(true)
-          .filter(task.residual())
+          .filter(parquetFilter ? task.residual() : Expressions.alwaysTrue())
           .caseSensitive(caseSensitive)
           .build();
     }

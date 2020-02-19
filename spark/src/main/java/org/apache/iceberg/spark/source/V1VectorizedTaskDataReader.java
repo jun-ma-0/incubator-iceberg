@@ -60,12 +60,14 @@ class V1VectorizedTaskDataReader implements InputPartitionReader<ColumnarBatch> 
   private Iterator<ColumnarBatch> currentIterator = null;
   private Closeable currentCloseable = null;
   private ColumnarBatch current = null;
+  private boolean parquetFilter;
 
   V1VectorizedTaskDataReader(
       CombinedScanTask task, Schema tableSchema, Schema expectedSchema, FileIO fileIo,
       EncryptionManager encryptionManager, boolean caseSensitive,
       scala.Function1<PartitionedFile,
-      scala.collection.Iterator<InternalRow>> buildReaderFunc) {
+      scala.collection.Iterator<InternalRow>> buildReaderFunc,
+      boolean parquetFilter) {
 
     this.fileIo = fileIo;
     this.tasks = task.files().iterator();
@@ -82,6 +84,7 @@ class V1VectorizedTaskDataReader implements InputPartitionReader<ColumnarBatch> 
     // open last because the schemas and fileIo must be set
     this.caseSensitive = caseSensitive;
     this.buildReaderFunc = buildReaderFunc;
+    this.parquetFilter = parquetFilter;
 
     // open after initializing everything
     this.currentIterator = open(tasks.next());

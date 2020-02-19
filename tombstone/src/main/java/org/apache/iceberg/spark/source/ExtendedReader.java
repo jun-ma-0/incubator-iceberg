@@ -26,14 +26,19 @@ import com.adobe.platform.iceberg.extensions.tombstone.SupportsTombstoneFilters;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExpressions;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneValidationException;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.types.Types;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
+  private static final Logger LOG = LoggerFactory.getLogger(ExtendedReader.class);
 
   private ExtendedTable table;
   // We preserve the dotted notation field name since org.apache.iceberg.types.Types.NestedField does not provide
@@ -56,7 +61,7 @@ public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
     this.tombstoneField = tombstoneField;
     this.tombstoneFieldName = tombstoneFieldName;
     this.options = options;
-    isVacuum = options.get(TombstoneExtension.TOMBSTONE_VACUUM).isPresent();
+    isVacuum = options.getBoolean(TombstoneExtension.TOMBSTONE_VACUUM, false);
     this.shouldFilterTombstones = options.getBoolean(ExtendedIcebergSource.TOMBSTONE_FILTER_ENABLED, true);
   }
 
@@ -73,17 +78,24 @@ public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
   @Override
   public Filter[] pushFilters(Filter[] filters) {
     if (isVacuum) {
+      // This will prevent the parquet reader from filtering based on residual evaluation of the same expression we've
+      // used to detect tombstone files
+      super.setParquetFilter(false);
+
       long readSnapshotId = this.options.getLong("snapshot-id", 0L);
       if (readSnapshotId <= 0L) {
         throw new RuntimeIOException("Invalid read snapshot id, expected > 0");
       }
-      List<ExtendedEntry> tombstones = table.getSnapshotTombstones(tombstoneField, table.snapshot(readSnapshotId));
+      Optional<String> overrideTombstones = options.get(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST);
+      List<ExtendedEntry> tombstones = overrideTombstones.map(s -> Arrays.stream(s.split(","))
+          .map(ExtendedEntry.Builder::withId).collect(Collectors.toList()))
+          .orElseGet(() -> table.getSnapshotTombstones(tombstoneField, table.snapshot(readSnapshotId)));
       this.tombstoneValues = tombstones.stream().map(t -> t.getEntry().getId()).collect(Collectors.toList());
+      LOG.info("Vacuum read tombstones count={} with values={} on snapshotId={} and table={}", tombstoneValues.size(),
+          tombstoneValues, table.currentSnapshot().snapshotId(), table.location());
       // Load only files that have at least ONE tombstone row
       if (!tombstoneValues.isEmpty()) {
-        TombstoneExpressions.matchesAny(tombstoneFieldName,
-            tombstoneValues)
-            .ifPresent(this::addFilter);
+        TombstoneExpressions.matchesAny(tombstoneFieldName, tombstoneValues).ifPresent(this::addFilter);
       } else {
         throw new TombstoneValidationException("Vacuum expects non-empty list of tombstones");
       }

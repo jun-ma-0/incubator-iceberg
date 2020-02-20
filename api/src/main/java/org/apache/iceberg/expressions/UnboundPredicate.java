@@ -22,6 +22,7 @@ package org.apache.iceberg.expressions;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
@@ -48,7 +49,11 @@ public class UnboundPredicate<T> extends Predicate<NamedReference> {
 
   UnboundPredicate(Operation op, NamedReference namedRef, Collection<Literal<T>> lits) {
     super(op, namedRef);
-    this.literals = Collections.unmodifiableCollection(lits);
+    if (lits == null) {
+      this.literals = null;
+    } else {
+      this.literals = Collections.unmodifiableCollection(lits);
+    }
   }
 
   @Override

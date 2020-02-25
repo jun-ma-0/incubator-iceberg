@@ -196,6 +196,7 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
     reader match {
       case r: SupportsTombstoneFilters =>
         val tombstoneExpression = tombstoneSourceBatchIdExpression(relation, r)
+        logInfo(s"TombstoneFilters: ${tombstoneExpression}")
         tombstoneExpression
       case _ => None
     }
@@ -218,10 +219,6 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
     if (literals.isEmpty) {
       return None
     }
-    val seqOfLiterals = literals.map(Literal(_))
-    val setOfLiterals = seqOfLiterals.toSet[Any]
-
-    logInfo(s"Tombstone filter sequence contains ${setOfLiterals.size} batch-ids")
     if (!"".equals(tombstoneFieldName) && tombstoneFieldName.indexOf(".") > -1) {
       // nested struct field
       val rootParentFieldName = tombstoneFieldName.substring(0, tombstoneFieldName.indexOf("."))
@@ -233,16 +230,15 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
         schema.fields(schema.fieldIndex(rootParentFieldName)) != null,
         s"No such field ${rootParentFieldName} in schema : ${schema}")
 
-      // PLATQ-3047:  We use InSet instead of In, which is a performant implementation of
-      //              checking In lists for static values.
-      Some(Not(InSet(buildGetStructField(rootParentFieldAtt, schema.fields(schema.fieldIndex(rootParentFieldName)),
-        subFieldName), setOfLiterals)))
+      Some(Not(In(buildGetStructField(rootParentFieldAtt, schema.fields(schema.fieldIndex(rootParentFieldName)),
+        subFieldName), literals.map(Literal(_)))))
+
     } else {
       // flat field
       val tombstoneAttMaybe = relation.output.find(a => a.name.equalsIgnoreCase(tombstoneFieldName))
       ValidationException.check(!tombstoneAttMaybe.isEmpty, s"Failed to find the tombstone field " +
         s"${tombstoneFieldName} in schema : ${relation.schema}")
-      Some(Not(InSet(tombstoneAttMaybe.get, setOfLiterals)))
+      Some(Not(In(tombstoneAttMaybe.get, literals.map(Literal(_)))))
     }
   }
 

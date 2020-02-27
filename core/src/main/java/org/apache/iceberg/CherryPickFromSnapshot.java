@@ -125,6 +125,7 @@ class CherryPickFromSnapshot extends MergingSnapshotProducer<CherryPick> impleme
 
   protected void addSummaryProperties() {
     set(SnapshotSummary.PUBLISHED_WAP_ID_PROP, stagedWapId(base.snapshot(cherryPickSnapshotId)));
+    set(SnapshotSummary.SOURCE_SNAPSHOT_ID_PROP, String.valueOf(cherryPickSnapshotId));
   }
 
   public TableOperations getOps() {

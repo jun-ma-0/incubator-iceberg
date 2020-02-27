@@ -81,10 +81,11 @@ public class TestWapWorkflow extends TableTestBase {
     TableMetadata base = readMetadata();
     long firstSnapshotId = base.currentSnapshot().snapshotId();
 
+    String wapId = "123456789";
     // first WAP commit
     table.newAppend()
         .appendFile(FILE_B)
-        .set(SnapshotSummary.STAGED_WAP_ID_PROP, "123456789")
+        .set(SnapshotSummary.STAGED_WAP_ID_PROP, wapId)
         .stageOnly()
         .commit();
     base = readMetadata();
@@ -114,6 +115,12 @@ public class TestWapWorkflow extends TableTestBase {
         Iterables.size(base.currentSnapshot().addedFiles()));
     Assert.assertEquals("Snapshot log should indicate number of snapshots committed", 2,
         base.snapshotLog().size());
+    Assert.assertEquals(SnapshotSummary.STAGED_WAP_ID_PROP + " property should be copied to cherrypick",
+        base.currentSnapshot().summary().getOrDefault(SnapshotSummary.PUBLISHED_WAP_ID_PROP, "12324"),
+        wapId);
+    Assert.assertEquals(SnapshotSummary.SOURCE_SNAPSHOT_ID_PROP + " property should be set in cherrypick",
+        base.currentSnapshot().summary().getOrDefault(SnapshotSummary.SOURCE_SNAPSHOT_ID_PROP, null),
+        String.valueOf(wapSnapshot.snapshotId()));
   }
 
   @Test

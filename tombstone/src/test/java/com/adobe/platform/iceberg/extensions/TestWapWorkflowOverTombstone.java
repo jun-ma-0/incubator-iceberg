@@ -45,6 +45,7 @@ import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotSummary;
 import org.apache.iceberg.exceptions.DuplicateWAPCommitException;
+import org.apache.iceberg.exceptions.TombstoneThresholdViolationException;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
 import org.junit.Test;
@@ -52,6 +53,51 @@ import org.junit.Test;
 import static java.util.stream.Collectors.toList;
 
 public class TestWapWorkflowOverTombstone extends WithSpark implements WithExecutorService {
+
+  @Test
+  public void testTombstoneWAPCommitWithValidTableProperties() {
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
+    // Update table property
+    table.updateProperties().set(HadoopTombstoneExtension.TOMBSTONE_MAX_COUNT_PROPERTY, "6").commit();
+    table.refresh();
+
+    Types.NestedField batchField = table.schema().findField("batch");
+
+    AppendFiles first = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
+    first.commit();
+
+    AppendFiles second = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "4", () -> "5", () -> "6"),
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
+
+    second.set(SnapshotSummary.STAGED_WAP_ID_PROP, "123")
+        .stageOnly()
+        .commit();
+
+    // 1st staged snapshots
+    List<Snapshot> snapshots = listSnapshots(table);
+    Snapshot staged1Snapshot = snapshots.get(snapshots.size() - 1);
+
+    // should work since its trying to add tombstone on top of current table
+    AppendFiles third = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "7", () -> "8", () -> "9"),
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
+    third.set(SnapshotSummary.STAGED_WAP_ID_PROP, "456")
+        .commit();
+
+    // should fail since now the limit will reach 9
+    AssertHelpers.assertThrows("Exceeding tombstone limit. Max configured: 6 total entries: 9",
+        TombstoneThresholdViolationException.class, "",
+        () -> table.cherrypick().cherrypick(staged1Snapshot.snapshotId()).commit());
+  }
 
   @Test
   public void testSerialCherrypickWithTombstone() {

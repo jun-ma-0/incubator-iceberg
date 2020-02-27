@@ -37,6 +37,7 @@ import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.exceptions.RuntimeIOException;
+import org.apache.iceberg.exceptions.TombstoneThresholdViolationException;
 import org.apache.iceberg.io.OutputFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,9 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
   // Figure out the directory where we're going to write/read tombstone data from
   private static final String METADATA_TOMBSTONE_DIR_PROPERTY = "adobe.tombstone.dir";
   private static final String TOMBSTONE_DIR_DEFAULT = "adobe/tombstone";
+  // TODO: we can in future implement namespace specific limits by replacing `all` with namespace
+  public static final String TOMBSTONE_MAX_COUNT_PROPERTY = "adobe.tombstone.all.maxCount";
+  public static final Integer TOMBSTONE_MAX_COUNT_DEFAULT = 1000;
 
   private Configuration conf;
   private TableOperations ops;
@@ -100,6 +104,8 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
       current
           .addAll(fromExternal(entries, Instant.now().toEpochMilli(), props, namespace,
               Collections.singletonMap("snapshot", String.valueOf(newSnapshotId))));
+      // validate the size
+      validateTombstoneCount(ops.current(), current.size());
       new Tombstones(this.conf).write(current, outputFile.location());
     } catch (IOException e) {
       throw new RuntimeIOException(e, "Failed to write tombstones to file: %s", outputFile.location());
@@ -153,10 +159,12 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
     } else {
       OutputFile outputFile = newTombstonesFile(ops.current());
       try {
-        new Tombstones(this.conf).write(
-            Lists.newArrayList(Stream.of(variantTombstones, baseTombstones)
-                .flatMap(Collection::stream)
-                .collect(Collectors.toSet())), // Equality is based on tombstone id and namespace only.
+        List<Tombstone> tombstoneIds = Lists.newArrayList(Stream.of(variantTombstones, baseTombstones)
+            .flatMap(Collection::stream)
+            .collect(Collectors.toSet()));
+        // validate the size
+        validateTombstoneCount(ops.current(), tombstoneIds.size());
+        new Tombstones(this.conf).write(tombstoneIds, // Equality is based on tombstone id and namespace only.
             outputFile.location());
       } catch (IOException e) {
         throw new RuntimeIOException(e, "Failed to write tombstones union to file: %s", outputFile.location());
@@ -214,5 +222,14 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
         TOMBSTONE_DIR_DEFAULT);
     return ops.io().newOutputFile(new Path(String.format("%s/%s/%s.avro",
         tableMetadata.location(), extensionDirectory, UUID.randomUUID().toString())).toString());
+  }
+
+  private void validateTombstoneCount(TableMetadata tableMetadata, Integer entries) {
+    Integer maxTombstoneSize = Integer.valueOf(tableMetadata.properties()
+        .getOrDefault(TOMBSTONE_MAX_COUNT_PROPERTY, TOMBSTONE_MAX_COUNT_DEFAULT.toString()));
+    if (entries > maxTombstoneSize) {
+      throw new TombstoneThresholdViolationException("Exceeding tombstone limit. Max configured: " + maxTombstoneSize +
+          " total entries: " + entries);
+    }
   }
 }

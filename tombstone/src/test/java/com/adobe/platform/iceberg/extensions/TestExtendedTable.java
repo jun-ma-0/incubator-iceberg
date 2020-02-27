@@ -20,6 +20,7 @@
 package com.adobe.platform.iceberg.extensions;
 
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
+import com.adobe.platform.iceberg.extensions.tombstone.HadoopTombstoneExtension;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
@@ -27,8 +28,10 @@ import java.util.AbstractMap;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.iceberg.AppendFiles;
+import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.exceptions.NoSuchTableException;
+import org.apache.iceberg.exceptions.TombstoneThresholdViolationException;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
 import org.junit.Test;
@@ -212,6 +215,58 @@ public class TestExtendedTable extends WithSpark {
     List<ExtendedEntry> currentSnapshotTombstones = table.getSnapshotTombstones(idField, table.currentSnapshot());
     Assert.assertEquals("Expect none of the tombstone apply since they reference column `batch` not `id`", 0,
         currentSnapshotTombstones.size());
+  }
+
+  @Test
+  public void testTombstoneCommitWithValidTableProperties() {
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
+    // Update table property
+    table.updateProperties().set(HadoopTombstoneExtension.TOMBSTONE_MAX_COUNT_PROPERTY, "3").commit();
+    table.refresh();
+
+    Types.NestedField batchField = table.schema().findField("batch");
+    AppendFiles first = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
+    first.commit();
+
+    AppendFiles second = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "4"),
+        ImmutableMap.of("purgeByMillis", "1571226183001", "reason", "test"),
+        1579792562L);
+    AssertHelpers.assertThrows("Exceeding tombstone limit. Max configured: 3 total entries: 4",
+        TombstoneThresholdViolationException.class, "", () -> second.commit());
+
+    // Now remove a tombstone and then try adding again.
+    table.newAppendWithTombstonesRemove(batchField,
+        ImmutableList.of(
+            () -> new AbstractMap.SimpleEntry<>(() -> "3", 1579792561L)))
+        .commit();
+
+    AppendFiles third = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "4"),
+        ImmutableMap.of("purgeByMillis", "1571226183001", "reason", "test"),
+        1579792562L);
+    third.commit();
+  }
+
+  @Test
+  public void testTombstoneCommitWithThresholdExceedingTableProperties() {
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
+    // Update table property
+    table.updateProperties().set(HadoopTombstoneExtension.TOMBSTONE_MAX_COUNT_PROPERTY, "2").commit();
+    Types.NestedField batchField = table.schema().findField("batch");
+    AppendFiles first = table.newAppendWithTombstonesAdd(
+        batchField,
+        Lists.newArrayList(() -> "1", () -> "2", () -> "3"),
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
+        1579792561L);
+    AssertHelpers.assertThrows("Exceeding tombstone limit. Max configured: 2 total entries: 3",
+        TombstoneThresholdViolationException.class, "", () -> first.commit());
   }
 
   @Test(expected = NoSuchTableException.class)

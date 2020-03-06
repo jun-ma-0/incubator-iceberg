@@ -55,13 +55,14 @@ public class TombstoneExpressions implements Serializable {
           tombstones.stream()
               .map(t -> Expressions.notEqual(fieldName, t.getEntry().getId()))
               .collect(Collectors.toList());
-      if (tombstones.size() >= 2) {
-        return Optional.of(Expressions.and(
-            Expressions.notNull(fieldName),
-            registry.subList(0, 1).get(0),
-            registry.subList(1, registry.size()).toArray(new Expression[registry.size() - 1])));
-      } else if (tombstones.size() == 1) {
+      if (tombstones.size() == 1) {
         return Optional.of(Expressions.and(Expressions.notNull(fieldName), registry.get(0)));
+      } else if (tombstones.size() > 1) {
+        Expression innerExpression = registry.get(0);
+        for (UnboundPredicate<String> stringUnboundPredicate : registry.subList(1, registry.size())) {
+          innerExpression = Expressions.and(innerExpression, stringUnboundPredicate);
+        }
+        return Optional.of(innerExpression);
       }
     }
     return Optional.empty();
@@ -84,10 +85,12 @@ public class TombstoneExpressions implements Serializable {
   private static Expression or(List<UnboundPredicate<String>> registry) {
     if (registry.size() == 1) {
       return registry.get(0);
-    } else if (registry.size() == 2) {
-      return Expressions.or(registry.get(0), registry.get(1));
-    } else if (registry.size() > 2) {
-      return Expressions.or(registry.get(0), or(registry.subList(1, registry.size())));
+    } else if (registry.size() > 1) {
+      Expression innerExpression = registry.get(0);
+      for (UnboundPredicate<String> stringUnboundPredicate : registry.subList(1, registry.size())) {
+        innerExpression = Expressions.or(innerExpression, stringUnboundPredicate);
+      }
+      return innerExpression;
     }
     return null;
   }

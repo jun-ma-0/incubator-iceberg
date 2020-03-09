@@ -48,6 +48,8 @@ import org.slf4j.LoggerFactory;
 public class ExtendedIcebergSource extends IcebergSource
     implements DataSourceV2, ReadSupport, WriteSupport, DataSourceRegister {
 
+  public static final String TOMBSTONE_FILTER_ENABLED = "iceberg.extension.tombstone.reader.filtering.enabled";
+
   private static final Logger LOG = LoggerFactory.getLogger(ExtendedIcebergSource.class);
 
   @Override

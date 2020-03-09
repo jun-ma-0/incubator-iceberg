@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.adobe.platform.iceberg.extensions.ExtendedIcebergSource;
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.SupportsTombstoneFilters;
@@ -39,6 +40,7 @@ public class ExtendedVectorizedReader extends V1VectorizedReader implements Supp
   // full precedence of field using dot notation so we will fail all SQL queries
   private String tombstoneFieldName;
   private List<String> tombstoneValues;
+  private boolean shouldFilterTombstones;
 
   public ExtendedVectorizedReader(
       ExtendedTable table,
@@ -55,12 +57,15 @@ public class ExtendedVectorizedReader extends V1VectorizedReader implements Supp
     this.tombstoneFieldName = tombstoneFieldName;
     List<ExtendedEntry> tombstones = this.table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
     this.tombstoneValues = tombstones.stream().map(t -> t.getEntry().getId()).collect(Collectors.toList());
+    this.shouldFilterTombstones = options.getBoolean(ExtendedIcebergSource.TOMBSTONE_FILTER_ENABLED, true);
   }
 
   @Override
   public Filter[] pushFilters(Filter[] filters) {
-    List<ExtendedEntry> tombstones = table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
-    TombstoneExpressions.notIn(tombstoneFieldName, tombstones).ifPresent(this::addFilter);
+    if (shouldFilterTombstones) {
+      List<ExtendedEntry> tombstones = table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
+      TombstoneExpressions.notIn(tombstoneFieldName, tombstones).ifPresent(this::addFilter);
+    }
     return super.pushFilters(filters);
   }
 
@@ -73,5 +78,10 @@ public class ExtendedVectorizedReader extends V1VectorizedReader implements Supp
   @Override
   public String[] tombstoneValues() {
     return (this.tombstoneValues == null) ? new String[0] : this.tombstoneValues.toArray(new String[0]);
+  }
+
+  @Override
+  public boolean shouldFilterTombstones() {
+    return shouldFilterTombstones;
   }
 }

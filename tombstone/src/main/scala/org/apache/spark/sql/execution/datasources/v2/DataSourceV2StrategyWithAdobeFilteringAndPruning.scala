@@ -19,6 +19,7 @@
 
 package org.apache.spark.sql.execution.datasources.v2
 
+import com.adobe.platform.iceberg.extensions.ExtendedIcebergSource
 import com.adobe.platform.iceberg.extensions.tombstone.SupportsTombstoneFilters
 import org.apache.iceberg.exceptions.ValidationException
 import org.apache.spark.sql.catalyst.CatalystTypeConverters.convertToScala
@@ -196,7 +197,11 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
     reader match {
       case r: SupportsTombstoneFilters =>
         val tombstoneExpression = tombstoneSourceBatchIdExpression(relation, r)
-        logInfo(s"TombstoneFilters: ${tombstoneExpression}")
+        if (tombstoneExpression.isDefined) {
+          logInfo(s"Tombstone Filters: ${tombstoneExpression}")
+        } else {
+          logInfo(s"Tombstone Filtering is switched off or there were no tombstones found.")
+        }
         tombstoneExpression
       case _ => None
     }
@@ -213,6 +218,12 @@ object DataSourceV2StrategyWithAdobeFilteringAndPruning extends Strategy {
   private def tombstoneSourceBatchIdExpression(relation: DataSourceV2Relation,
                 tombstoneReader: SupportsTombstoneFilters): Option[Expression] = {
     // TODO: This is a case-insensitive check so works for acp_system_metadata case but should be checked properly
+    val shouldFilterTombstones: Boolean = tombstoneReader.shouldFilterTombstones()
+
+    // do not proceed if the reader doesn't want tombstone filtering to be handled
+    if (!shouldFilterTombstones) {
+      return None
+    }
     val tombstoneFieldName = tombstoneReader.tombstoneField()
     val literals = tombstoneReader.tombstoneValues().toSeq
 

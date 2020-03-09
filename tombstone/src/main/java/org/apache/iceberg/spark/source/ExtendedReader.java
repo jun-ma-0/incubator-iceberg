@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.adobe.platform.iceberg.extensions.ExtendedIcebergSource;
 import com.adobe.platform.iceberg.extensions.ExtendedTable;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.SupportsTombstoneFilters;
@@ -42,6 +43,7 @@ public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
   private List<String> tombstoneValues;
   private DataSourceOptions options;
   private Boolean isVacuum;
+  private boolean shouldFilterTombstones;
 
   public ExtendedReader(
       ExtendedTable table,
@@ -55,6 +57,7 @@ public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
     this.tombstoneFieldName = tombstoneFieldName;
     this.options = options;
     isVacuum = options.get(TombstoneExtension.TOMBSTONE_VACUUM).isPresent();
+    this.shouldFilterTombstones = options.getBoolean(ExtendedIcebergSource.TOMBSTONE_FILTER_ENABLED, true);
   }
 
   @Override
@@ -84,12 +87,17 @@ public class ExtendedReader extends Reader implements SupportsTombstoneFilters {
       } else {
         throw new TombstoneValidationException("Vacuum expects non-empty list of tombstones");
       }
-    } else {
+    } else if (shouldFilterTombstones) {
       List<ExtendedEntry> tombstones = table.getSnapshotTombstones(tombstoneField, table.currentSnapshot());
       this.tombstoneValues = tombstones.stream().map(t -> t.getEntry().getId()).collect(Collectors.toList());
       // Load all files BUT the ones that have all tombstone rows
       TombstoneExpressions.notIn(tombstoneFieldName, tombstones).ifPresent(this::addFilter);
     }
     return super.pushFilters(filters);
+  }
+
+  @Override
+  public boolean shouldFilterTombstones() {
+    return shouldFilterTombstones;
   }
 }

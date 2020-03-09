@@ -36,4 +36,10 @@ public interface SupportsTombstoneFilters extends DataSourceReader {
    * Returns the tombstone values kept in the table's current snapshot summary
    */
   String[] tombstoneValues();
+
+  /**
+   * Tells the upstream/downstream spark flow whether or not the reader wants tombstones filtered outside the reader
+   * @return true if the reader wants the tombstones fitlered
+   */
+  boolean shouldFilterTombstones();
 }

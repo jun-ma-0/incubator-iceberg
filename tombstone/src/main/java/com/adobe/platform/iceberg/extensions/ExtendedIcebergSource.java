@@ -111,7 +111,7 @@ public class ExtendedIcebergSource extends IcebergSource
     Configuration conf = new Configuration(lazyBaseConf());
     ExtendedTable table = getTableAndResolveHadoopConfiguration(options, conf);
     Schema dsSchema = SparkSchemaUtil.convert(table.schema(), dsStruct);
-    validateWriteSchema(table.schema(), dsSchema, checkNullability(options));
+    validateWriteSchema(table.schema(), dsSchema, checkNullability(options), checkOrdering(options));
     validatePartitionTransforms(table.spec());
     String appId = lazySparkSession().sparkContext().applicationId();
     String wapId = options.get("wap-id").orElse(lazySparkSession().conf().get("spark.wap.id", null));

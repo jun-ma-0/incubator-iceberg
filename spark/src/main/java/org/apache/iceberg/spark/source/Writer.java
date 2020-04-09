@@ -302,7 +302,7 @@ class Writer implements DataSourceWriter {
       if (spec.fields().isEmpty()) {
         return new UnpartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
       } else {
-        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, io.value(), targetFileSize, dsSchema);
+        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, dsSchema);
       }
     }
 

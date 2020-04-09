@@ -205,7 +205,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
         .forEach(key -> baseConf.set(key.replaceFirst("hadoop.", ""), options.get(key)));
   }
 
-  private void validateWriteSchema(
+  protected void validateWriteSchema(
           Schema tableSchema, Schema dsSchema, Boolean checkNullability, Boolean checkOrdering) {
     List<String> errors;
     if (checkNullability) {
@@ -245,20 +245,10 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     return sparkCheckNullability && dataFrameCheckNullability;
   }
 
-  private boolean checkOrdering(DataSourceOptions options) {
+  protected boolean checkOrdering(DataSourceOptions options) {
     boolean sparkCheckOrdering = Boolean.parseBoolean(lazySpark.conf()
             .get("spark.sql.iceberg.check-ordering", "true"));
     boolean dataFrameCheckOrdering = options.getBoolean("check-ordering", true);
     return sparkCheckOrdering && dataFrameCheckOrdering;
-  }
-
-  private FileIO fileIO(Table table) {
-    if (table.io() instanceof HadoopFileIO) {
-      // we need to use Spark's SerializableConfiguration to avoid issues with Kryo serialization
-      SerializableConfiguration conf = new SerializableConfiguration(((HadoopFileIO) table.io()).conf());
-      return new HadoopFileIO(conf::value);
-    } else {
-      return table.io();
-    }
   }
 }

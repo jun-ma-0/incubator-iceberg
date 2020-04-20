@@ -40,8 +40,11 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
+import org.hamcrest.core.Is;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
 public class TestSparkVacuumOverwriteTombstones extends WithSpark {
 
@@ -214,16 +217,17 @@ public class TestSparkVacuumOverwriteTombstones extends WithSpark {
     }
     deleteFiles.commit();
 
+    // Expect vacuum to fail since it will attempt to vacuum a data file that we've already deleted
+    exceptionRule.expect(org.apache.spark.SparkException.class);
+    exceptionRule.expectMessage("Writing job aborted");
+    exceptionRule.expectCause(Is.isA(org.apache.iceberg.exceptions.ValidationException.class));
+
     // Vacuum tombstone rows
     sparkVacuum.reduceWithAntiJoin();
-
-    Dataset<Row> adobeIceberg = sparkWithTombstonesExtension.read()
-        .format("iceberg.adobe").option(TombstoneExtension.TOMBSTONE_COLUMN, "data").load(getTableLocation());
-    Assert.assertEquals("Expect 2000 rows left", 2000, adobeIceberg.count());
-
-    Dataset<Row> iceberg = sparkWithTombstonesExtension.read().format("iceberg").load(getTableLocation());
-    Assert.assertEquals("Expect 2000 rows left", 2000, iceberg.count());
   }
+
+  @Rule
+  public ExpectedException exceptionRule = ExpectedException.none();
 
   @Test
   @SuppressWarnings("checkstyle:HiddenField")
@@ -250,8 +254,7 @@ public class TestSparkVacuumOverwriteTombstones extends WithSpark {
     ExtendedTable extendedTable = tables.loadWithTombstoneExtension(getTableLocation());
 
     // Load data for vacuum
-    SparkVacuum sparkVacuum = new SparkVacuum(spark, extendedTable, "data")
-        .load(100);
+    SparkVacuum sparkVacuum = new SparkVacuum(spark, extendedTable, "data").load(100);
 
     // We will make a new commit in Iceberg by removing the file matching `data=a`, this is expected to be vacuumed too
     Iterator<FileScanTask> iterator =
@@ -262,15 +265,12 @@ public class TestSparkVacuumOverwriteTombstones extends WithSpark {
     }
     deleteFiles.commit();
 
+    exceptionRule.expect(org.apache.spark.SparkException.class);
+    exceptionRule.expectMessage("Writing job aborted");
+    exceptionRule.expectCause(Is.isA(org.apache.iceberg.exceptions.ValidationException.class));
+
     // Vacuum tombstone rows
     sparkVacuum.reduceWithAntiJoin();
-
-    Dataset<Row> adobeIceberg = sparkWithTombstonesExtension.read()
-        .format("iceberg.adobe").option(TombstoneExtension.TOMBSTONE_COLUMN, "data").load(getTableLocation());
-    Assert.assertEquals("Expect 0 rows left", 2000, adobeIceberg.count());
-
-    Dataset<Row> iceberg = sparkWithTombstonesExtension.read().format("iceberg").load(getTableLocation());
-    Assert.assertEquals("Expect 0 rows left", 2000, iceberg.count());
   }
 
   @Test

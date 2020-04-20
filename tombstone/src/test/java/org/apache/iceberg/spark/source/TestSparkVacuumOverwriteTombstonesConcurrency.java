@@ -35,9 +35,7 @@ import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
 import org.junit.Assert;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 
 public class TestSparkVacuumOverwriteTombstonesConcurrency extends WithSpark {
 
@@ -72,9 +70,6 @@ public class TestSparkVacuumOverwriteTombstonesConcurrency extends WithSpark {
       new SimpleRecord(14, now, "Y", "y"),
       new SimpleRecord(15, now, "Y", "y"),
       new SimpleRecord(15, now, "Y", "y"));
-
-  @Rule
-  public ExpectedException exceptionRule = ExpectedException.none();
 
   @Override
   public void implicitTable(ExtendedTables tables, String tableLocation) {

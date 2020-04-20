@@ -19,14 +19,17 @@
 
 package com.adobe.platform.iceberg.extensions;
 
+import com.adobe.platform.iceberg.extensions.tombstone.Entry;
 import com.adobe.platform.iceberg.extensions.tombstone.ExtendedEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.HadoopTombstoneExtension;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.DataFiles;
@@ -266,11 +269,32 @@ public class TestExtendedTable extends WithSpark {
         ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"),
         1579792561L);
     AssertHelpers.assertThrows("Exceeding tombstone limit. Max configured: 2 total entries: 3",
-        TombstoneThresholdViolationException.class, "", () -> first.commit());
+        TombstoneThresholdViolationException.class, "", first::commit);
   }
 
   @Test(expected = NoSuchTableException.class)
   public void testAppendFileWithTombstonesNoSuchTable() {
     tables.loadWithTombstoneExtension("noSuchTablePath");
+  }
+
+
+  @Test
+  public void testTombstoneConsistentListing() {
+    List<Entry> tombstones = new ArrayList<>();
+    IntStream.range(0, 1000).forEach(i -> tombstones.add(() -> String.valueOf(i)));
+
+    ExtendedTable table = tables.loadWithTombstoneExtension(getTableLocation());
+    Types.NestedField batchField = table.schema().findField("batch");
+    table.newAppendWithTombstonesAdd(batchField, tombstones,
+        ImmutableMap.of("purgeByMillis", "1571226183000", "reason", "test"), 1579792561L)
+        .commit();
+
+    IntStream.of(1, 10).forEach(index -> {
+      List<String> once = table.getSnapshotTombstones(batchField, table.currentSnapshot(), 100)
+          .stream().map(e -> e.getEntry().getId()).collect(Collectors.toList());
+      List<String> twice = table.getSnapshotTombstones(batchField, table.currentSnapshot(), 100)
+          .stream().map(e -> e.getEntry().getId()).collect(Collectors.toList());
+      Assert.assertEquals(once, twice);
+    });
   }
 }

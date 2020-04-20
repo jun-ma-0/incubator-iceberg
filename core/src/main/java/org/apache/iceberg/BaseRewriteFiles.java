@@ -22,8 +22,8 @@ package org.apache.iceberg;
 import com.google.common.base.Preconditions;
 import java.util.Set;
 
-class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
-  BaseRewriteFiles(TableOperations ops) {
+public class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
+  public BaseRewriteFiles(TableOperations ops) {
     super(ops);
 
     // replace files must fail if any of the deleted paths is missing and cannot be deleted

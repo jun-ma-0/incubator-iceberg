@@ -19,7 +19,6 @@
 
 package com.adobe.platform.iceberg.extensions;
 
-import com.adobe.platform.iceberg.extensions.tombstone.EvictEntry;
 import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExpressions;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
@@ -27,23 +26,25 @@ import com.google.common.base.Preconditions;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import org.apache.iceberg.BaseOverwriteFiles;
 import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Expression;
-import org.apache.iceberg.io.OutputFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * @deprecated in favour of com.adobe.platform.iceberg.extensions.BaseVacuumRewrite
+ */
+@Deprecated
 class BaseVacuumOverwrite extends BaseOverwriteFiles implements VacuumOverwrite, Serializable {
-  private static final Logger LOG = LoggerFactory.getLogger(BaseVacuumOverwrite.class);
 
+  private static final Logger LOG = LoggerFactory.getLogger(BaseVacuumOverwrite.class);
+  private final ExtendedTableOperations ops;
+  private final TombstoneExtension tombstoneExtension;
   private Namespace namespace;
-  private List<EvictEntry> toBeRemoved = null;
-  private ExtendedTableOperations ops;
-  private TombstoneExtension tombstoneExtension;
+  private List<String> toBeRemoved = null;
 
   BaseVacuumOverwrite(ExtendedTableOperations ops, TombstoneExtension tombstoneExtension) {
     super(ops);
@@ -55,29 +56,8 @@ class BaseVacuumOverwrite extends BaseOverwriteFiles implements VacuumOverwrite,
 
   @Override
   public List<ManifestFile> apply(TableMetadata base) {
-    if (toBeRemoved != null && !toBeRemoved.isEmpty()) {
-      OutputFile outputFile = tombstoneExtension
-          .removeById(
-              ops.current().currentSnapshot(),
-              toBeRemoved.stream().map(evictEntry -> evictEntry.get().getKey().getId()).collect(Collectors.toList()),
-              namespace);
-      // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
-      // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
-      this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, outputFile.location());
-      LOG.info(
-          "Create new tombstone file:{} after vacuum of tombstones:{} on snapshot: {} with location:{}",
-          outputFile.location(),
-          toBeRemoved.size(),
-          base.location(),
-          base.currentSnapshot().snapshotId());
-    } else {
-      // Assuming there are no tombstones to remove we fallback to referencing the tombstone file for new snapshot
-      tombstoneExtension.copyReference(ops.current().currentSnapshot())
-          // Atomic guarantee - bind the tombstone avro output file location to the new snapshot summary property
-          // Iceberg will do an atomic commit of the snapshot w/ both the data files and the tombstone file or neither
-          .map(f -> this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, f));
-    }
-
+    applyTombstoneChanges(toBeRemoved, tombstoneExtension, ops, namespace)
+        .map(f -> this.set(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY, f));
     return super.apply(base);
   }
 
@@ -91,21 +71,22 @@ class BaseVacuumOverwrite extends BaseOverwriteFiles implements VacuumOverwrite,
   public VacuumOverwrite tombstones(
       Namespace namespace,
       String columnName,
-      List<EvictEntry> entries,
+      List<String> entries,
       Long readSnapshotId) {
-    Preconditions.checkArgument(readSnapshotId > 0L, "Invalid read snapshot id, expected greater than 0 (zero)");
+
+    Preconditions.checkArgument(readSnapshotId > 0L,
+        "Invalid read snapshot id, expected greater than 0 (zero)");
 
     this.namespace = namespace;
     this.toBeRemoved = entries;
 
-    Optional<Expression> expression = TombstoneExpressions.matchesAny(
-        columnName,
-        entries.stream().map(e -> e.get().getKey().getId()).collect(Collectors.toList()));
+    Optional<Expression> expression = TombstoneExpressions.matchesAny(columnName, entries);
 
     if (expression.isPresent()) {
       this.overwriteByRowFilter(expression.get());
       this.validateNoConflictingAppends(readSnapshotId, expression.get());
-      LOG.info("Vacuum tombstones={} on snapshotId={} for namespace={} and columnName={}", toBeRemoved.size(),
+      LOG.info("Vacuum tombstones={} on snapshotId={} for namespace={} and columnName={}",
+          toBeRemoved.size(),
           readSnapshotId, namespace, columnName);
       return this;
     }

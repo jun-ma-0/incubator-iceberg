@@ -53,8 +53,8 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
   public static final String TOMBSTONE_MAX_COUNT_PROPERTY = "adobe.tombstone.all.maxCount";
   public static final Integer TOMBSTONE_MAX_COUNT_DEFAULT = 1000;
 
-  private Configuration conf;
-  private TableOperations ops;
+  private final Configuration conf;
+  private final TableOperations ops;
 
   public HadoopTombstoneExtension(Configuration conf, TableOperations ops) {
     this.conf = conf;
@@ -135,30 +135,35 @@ public class HadoopTombstoneExtension implements TombstoneExtension {
    * {@inheritDoc}
    */
   @Override
-  public List<ExtendedEntry> get(Snapshot snapshot, Namespace namespace) {
-    return load(snapshot).stream()
-        .filter(tombstone -> tombstone.getNamespace().equalsIgnoreCase(namespace.getId()))
-        .map(tombstone -> new ExtendedEntry() {
-          @Override
-          public Entry getEntry() {
-            return tombstone::getId;
-          }
+  public List<ExtendedEntry> get(Snapshot snapshot, Namespace namespace, Optional<Integer> limit) {
+    Stream<Tombstone> tombstoneStream = load(snapshot).stream()
+        .filter(tombstone -> tombstone.getNamespace().equalsIgnoreCase(namespace.getId()));
+    Stream<Tombstone> stream = limit.map(tombstoneStream::limit).orElse(tombstoneStream);
+    return stream.map(this::map).collect(Collectors.toList());
+  }
 
-          @Override
-          public Long getEvictTimestamp() {
-            return tombstone.getEvictionTs();
-          }
+  private ExtendedEntry map(Tombstone tombstone) {
+    return new ExtendedEntry() {
+      @Override
+      public Entry getEntry() {
+        return tombstone::getId;
+      }
 
-          @Override
-          public Map<String, String> getProperties() {
-            return tombstone.getProperties();
-          }
+      @Override
+      public Long getEvictTimestamp() {
+        return tombstone.getEvictionTs();
+      }
 
-          @Override
-          public Map<String, String> getInternalProperties() {
-            return tombstone.getInternal();
-          }
-        }).collect(Collectors.toList());
+      @Override
+      public Map<String, String> getProperties() {
+        return tombstone.getProperties();
+      }
+
+      @Override
+      public Map<String, String> getInternalProperties() {
+        return tombstone.getInternal();
+      }
+    };
   }
 
   /**

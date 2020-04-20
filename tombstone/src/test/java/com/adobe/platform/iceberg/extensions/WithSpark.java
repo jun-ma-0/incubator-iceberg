@@ -48,6 +48,7 @@ public class WithSpark implements WithDefaultIcebergTable {
   public static void startSpark() {
     sparkWithTombstonesExtension = SparkSession.builder()
         .master("local[2]")
+        .config("spark.sql.iceberg.check-nullability", "false")
         .getOrCreate();
 
     spark = sparkWithTombstonesExtension.newSession();

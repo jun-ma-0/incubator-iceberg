@@ -70,6 +70,18 @@ public interface ExtendedTable extends Table, Serializable {
   List<ExtendedEntry> getSnapshotTombstones(Types.NestedField column, Snapshot snapshot);
 
   /**
+   * Retrieves list of tombstones from this table's specific snapshot for the indicated schema
+   * column.
+   *
+   * @param column a column name that must be part of the schema
+   * @param snapshot a specific snapshot
+   * @param limit the number of tombstones the vacuum should reduce (this API needs to provide consistent results for
+   *        the same limit value)
+   * @return a new list of tombstones stored for the specific column
+   */
+  List<ExtendedEntry> getSnapshotTombstones(Types.NestedField column, Snapshot snapshot, int limit);
+
+  /**
    * Retrieves a dataset with the tombstones from this table's specific snapshot for the indicated schema
    * column.
    *
@@ -95,14 +107,40 @@ public interface ExtendedTable extends Table, Serializable {
 
   /**
    * Create a new {@link VacuumOverwrite API} to replace files after removing tombstones from this table.
+   * @deprecated in favour of {@link new}
    *
    * @param column a map entry using the full column name as key and the nested field as value
    * @param entries tombstone entries associated for the rows that will be deleted from data files
    * @param readSnapshotId the read snapshot id
    * @return a new {@link VacuumOverwrite}
    */
-  VacuumOverwrite newVacuumTombstones(
-      Map.Entry<String, Types.NestedField> column, List<ExtendedEntry> entries,
+  @Deprecated
+  VacuumOverwrite newVacuumOverwrite(Map.Entry<String, Types.NestedField> column,
+      List<String> entries,
+      Long readSnapshotId);
+
+  /**
+   * Create a new {@link VacuumDelete API} to delete files after removing tombstones from this table.
+   *
+   * @param column a map entry using the full column name as key and the nested field as value
+   * @param entries tombstone entries associated for the rows that will be deleted from data files
+   * @param readSnapshotId the read snapshot id
+   * @return a new {@link VacuumDelete}
+   */
+  VacuumDelete newVacuumDelete(Map.Entry<String, Types.NestedField> column,
+      List<String> entries,
+      Long readSnapshotId);
+
+  /**
+   * Create a new {@link VacuumRewrite API} to replace files after removing tombstones from this table.
+   *
+   * @param column a map entry using the full column name as key and the nested field as value
+   * @param entries tombstone entries associated for the rows that will be deleted from data files
+   * @param readSnapshotId the read snapshot id
+   * @return a new {@link VacuumRewrite}
+   */
+  VacuumRewrite newVacuumRewrite(Map.Entry<String, Types.NestedField> column,
+      List<String> entries,
       Long readSnapshotId);
 
   /**

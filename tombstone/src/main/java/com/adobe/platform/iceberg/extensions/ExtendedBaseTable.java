@@ -26,11 +26,9 @@ import com.adobe.platform.iceberg.extensions.tombstone.Namespace;
 import com.adobe.platform.iceberg.extensions.tombstone.TombstoneExtension;
 import com.google.common.base.Preconditions;
 import java.io.Serializable;
-import java.util.AbstractMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CherryPick;
@@ -41,6 +39,7 @@ import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.NestedField;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -48,8 +47,8 @@ import org.apache.spark.sql.SparkSession;
 public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTableOperations,
     Serializable {
 
-  private TombstoneExtension tombstoneExtension;
-  private ExtendedTableOperations ops;
+  private final TombstoneExtension tombstoneExtension;
+  private final ExtendedTableOperations ops;
 
   ExtendedBaseTable(
       ExtendedTableOperations ops, String name,
@@ -80,15 +79,27 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
   }
 
   @Override
-  public VacuumOverwrite newVacuumTombstones(
-      Map.Entry<String, Types.NestedField> column,
-      List<ExtendedEntry> entries, Long readSnapshotId) {
+  public VacuumOverwrite newVacuumOverwrite(
+          Map.Entry<String, Types.NestedField> column,
+          List<String> entries, Long readSnapshotId) {
     return new BaseVacuumOverwrite(ops, tombstoneExtension)
-        .tombstones(namespaceOf(column.getValue()), column.getKey(),
-            entries.stream()
-                .map(e -> (EvictEntry) () -> new AbstractMap.SimpleEntry<>(e.getEntry(), e.getEvictTimestamp()))
-                .collect(Collectors.toList()),
-            readSnapshotId);
+            .tombstones(namespaceOf(column.getValue()), column.getKey(), entries, readSnapshotId);
+  }
+
+  @Override
+  public VacuumDelete newVacuumDelete(
+          Map.Entry<String, NestedField> column,
+          List<String> entries, Long readSnapshotId) {
+    return new BaseVacuumDelete(ops, tombstoneExtension,
+            entries,
+            namespaceOf(column.getValue()));
+  }
+
+  @Override
+  public VacuumRewrite newVacuumRewrite(
+          Map.Entry<String, NestedField> column,
+          List<String> entries, Long readSnapshotId) {
+    return new BaseVacuumRewrite(ops, tombstoneExtension, entries, namespaceOf(column.getValue()));
   }
 
   @Override
@@ -151,7 +162,24 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
         "Column id(%s) does not match with column name: (%s)",
         column.fieldId(),
         column.name());
-    return tombstoneExtension.get(snapshot, namespaceOf(field));
+    return tombstoneExtension.get(snapshot, namespaceOf(field), Optional.empty());
+  }
+
+  @Override
+  public List<ExtendedEntry> getSnapshotTombstones(Types.NestedField column, Snapshot snapshot, int limit) {
+    Preconditions.checkArgument(column != null, "Invalid column name: (null)");
+    Types.NestedField field = schema().findField(column.fieldId());
+    Preconditions.checkArgument(
+        field != null,
+        "Unable to find column(%s) with id: (%s)",
+        column.name(),
+        column.fieldId());
+    Preconditions.checkArgument(
+        field.name().equals(column.name()),
+        "Column id(%s) does not match with column name: (%s)",
+        column.fieldId(),
+        column.name());
+    return tombstoneExtension.get(snapshot, namespaceOf(field), Optional.of(limit));
   }
 
   @Override
@@ -165,7 +193,7 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
     Snapshot snapshot = this.snapshot(snapshotId);
     Preconditions.checkArgument(
         snapshot != null,
-        "Unable to find snapshot with id: (%d)",
+        "Unable to find snapshot with id: (%s)",
         snapshotId);
     Optional<String> tombstoneFilePathProperty =
         Optional.ofNullable(snapshot.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));
@@ -187,7 +215,7 @@ public class ExtendedBaseTable extends BaseTable implements ExtendedTable, HasTa
     Snapshot snapshot = this.snapshot(snapshotId);
     Preconditions.checkArgument(
         snapshot != null,
-        "Unable to find snapshot with id: (%d)",
+        "Unable to find snapshot with id: (%s)",
         snapshotId);
     Optional<String> tombstoneFilePathProperty =
         Optional.ofNullable(snapshot.summary().get(TombstoneExtension.SNAPSHOT_TOMBSTONE_FILE_PROPERTY));

@@ -29,6 +29,7 @@ public interface TombstoneExtension {
 
   String TOMBSTONE_COLUMN = "iceberg.extension.tombstone.col";
   String TOMBSTONE_COLUMN_VALUES_LIST = "iceberg.extension.tombstone.values";
+  String TOMBSTONE_COLUMN_VALUES_LIMIT = "iceberg.extension.tombstone.limit";
   String TOMBSTONE_COLUMN_EVICT_TS = "iceberg.extension.tombstone.evict.epochTime";
   // This links the file we've used to store the provided tombstones to a snapshot summary property for Iceberg
   String SNAPSHOT_TOMBSTONE_FILE_PROPERTY = "iceberg.extension.tombstone.file";
@@ -40,9 +41,10 @@ public interface TombstoneExtension {
    *
    * @param snapshot the table snapshot
    * @param namespace the namespace used to identify the tombstones
+   * @param limit optional value to indicate number of tombstones to retrieve, empty means no limit
    * @return list of tombstones extended entries in the snapshot and namespace
    */
-  List<ExtendedEntry> get(Snapshot snapshot, Namespace namespace);
+  List<ExtendedEntry> get(Snapshot snapshot, Namespace namespace, Optional<Integer> limit);
 
   /**
    * Appends current tombstones entries with the provided tombstones and writes result into new

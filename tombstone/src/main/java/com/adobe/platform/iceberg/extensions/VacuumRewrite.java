@@ -19,26 +19,19 @@
 
 package com.adobe.platform.iceberg.extensions;
 
-import org.apache.iceberg.OverwriteFiles;
+import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.exceptions.ValidationException;
 
 /**
- * API for overwriting files in a table for tombstone rows vacuuming
+ * API for replacing files in a table for tombstone rows vacuuming
  * <p>
- * This API accumulates file additions and produces a new {@link Snapshot} of the table by replacing
- * all the deleted files with the set of additions. This operation is used to implement idempotent
- * writes that always replace a section of a table with new data or update/delete operations that
- * eagerly overwrite files while making sure it merges the tombstone metadata correctly.
- * <p>
- * Overwrites can be validated. The default validation mode is idempotent, meaning the overwrite is
- * correct and should be committed out regardless of other concurrent changes to the table.
- * This API can be configured for overwriting certain files by providing a filter expression
- * while assuming that new data that would need to be filtered has been added would only qualify as
- * false positive metrics matches.
+ * This API accumulates file additions and deletions, produces a new {@link Snapshot} of the
+ * changes, and commits that snapshot as the current while making sure it merges the tombstone metadata correctly.
  * <p>
  * When committing, these changes will be applied to the latest table snapshot. Commit conflicts
  * will be resolved by applying the changes to the new latest snapshot and reattempting the commit.
+ * If any of the deleted files are no longer in the latest snapshot when reattempting, the commit
+ * will throw a {@link ValidationException}.
  */
-public interface VacuumOverwrite extends OverwriteFiles, VacuumSnapshotUpdate<OverwriteFiles> {
-
-}
+public interface VacuumRewrite extends RewriteFiles, VacuumSnapshotUpdate<RewriteFiles> { }

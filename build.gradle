@@ -105,6 +105,8 @@ project(':iceberg-api') {
   dependencies {
     testCompile "org.apache.avro:avro"
     testCompile 'joda-time:joda-time'
+
+    compile "net.openhft:zero-allocation-hashing"
   }
 }
 

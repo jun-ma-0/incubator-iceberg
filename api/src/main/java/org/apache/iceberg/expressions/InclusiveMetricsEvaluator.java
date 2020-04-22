@@ -19,14 +19,18 @@
 
 package org.apache.iceberg.expressions;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.bf.BloomFilter;
+import org.apache.iceberg.bf.BloomFilterReader;
 import org.apache.iceberg.expressions.ExpressionVisitors.BoundExpressionVisitor;
 import org.apache.iceberg.types.Comparators;
 import org.apache.iceberg.types.Conversions;
@@ -70,7 +74,7 @@ public class InclusiveMetricsEvaluator {
    * @param file a data file
    * @return false if the file cannot contain rows that match the expression, true otherwise.
    */
-  public boolean eval(DataFile file) {
+  public boolean eval(DataFile file){
     // TODO: detect the case where a column is missing from the file using file's max field id.
     return visitor().eval(file);
   }
@@ -83,8 +87,9 @@ public class InclusiveMetricsEvaluator {
     private Map<Integer, Long> nullCounts = null;
     private Map<Integer, ByteBuffer> lowerBounds = null;
     private Map<Integer, ByteBuffer> upperBounds = null;
+    private Map<Integer, BloomFilter> bloomFilters = null;
 
-    private boolean eval(DataFile file) {
+    private boolean eval(DataFile file){
       if (file.recordCount() == 0) {
         return ROWS_CANNOT_MATCH;
       }
@@ -100,6 +105,15 @@ public class InclusiveMetricsEvaluator {
       this.nullCounts = file.nullValueCounts();
       this.lowerBounds = file.lowerBounds();
       this.upperBounds = file.upperBounds();
+      // todo - heihei - add bloom filter columns into data file struct. So that we can know each file has bloom filter for which column?
+      //                    pro: schema evolution can change bf properties, but the actual status for each file can be stored in data file
+      //                    con：if bf gets generated on other columns for existing data file, then the file metadata should be updated.
+      try {
+        this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file);
+      } catch (IOException e) {
+        e.printStackTrace();
+        throw new RuntimeException("heihei", e);
+      }
 
       return ExpressionVisitors.visitEvaluator(expr, this);
     }
@@ -257,6 +271,15 @@ public class InclusiveMetricsEvaluator {
 
         int cmp = lit.comparator().compare(upper, lit.value());
         if (cmp < 0) {
+          return ROWS_CANNOT_MATCH;
+        }
+      }
+
+      if (bloomFilters != null && bloomFilters.containsKey(id)) {
+        BloomFilter bf = bloomFilters.get(id);
+        long hash = bf.hash(lit.value());
+        // todo - add api mightContain()
+        if(!bf.findHash(hash)) {
           return ROWS_CANNOT_MATCH;
         }
       }

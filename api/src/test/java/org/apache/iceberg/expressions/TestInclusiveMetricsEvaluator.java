@@ -25,13 +25,19 @@ import org.apache.iceberg.DataFile;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.TestHelpers.Row;
 import org.apache.iceberg.TestHelpers.TestDataFile;
+import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.IntegerType;
 import org.apache.iceberg.types.Types.StringType;
 import org.apache.iceberg.util.UnicodeUtil;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.io.IOException;
 
 import static org.apache.iceberg.expressions.Expressions.and;
 import static org.apache.iceberg.expressions.Expressions.equal;
@@ -61,10 +67,25 @@ public class TestInclusiveMetricsEvaluator {
       optional(6, "no_nulls", Types.StringType.get())
   );
 
+  private static String tableLocation;
+
+  static {
+    try {
+      TemporaryFolder temp = new TemporaryFolder();
+      temp.create();
+      File file = temp.newFolder("TestInclusiveMetricsEvaluator");
+      tableLocation = file.getPath();
+    } catch (IOException e) {
+      throw new RuntimeIOException("Unable to create table location", e);
+    }
+  }
+
+  private static String dataLocation = String.format("%s/data", tableLocation);
+
   private static final int INT_MIN_VALUE = 30;
   private static final int INT_MAX_VALUE = 79;
 
-  private static final DataFile FILE = new TestDataFile("file.avro", Row.of(), 50,
+  private static final DataFile FILE = new TestDataFile(String.format("%s/file.avro", dataLocation), Row.of(), 50,
       // any value counts, including nulls
       ImmutableMap.of(
           4, 50L,
@@ -82,7 +103,7 @@ public class TestInclusiveMetricsEvaluator {
       ImmutableMap.of(
           1, toByteBuffer(IntegerType.get(), INT_MAX_VALUE)));
 
-  private static final DataFile FILE_2 = new TestDataFile("file_2.avro", Row.of(), 50,
+  private static final DataFile FILE_2 = new TestDataFile(String.format("%s/file_2.avro", dataLocation), Row.of(), 50,
       // any value counts, including nulls
       ImmutableMap.of(3, 20L),
       // null value counts
@@ -92,7 +113,7 @@ public class TestInclusiveMetricsEvaluator {
       // upper bounds
       ImmutableMap.of(3, toByteBuffer(StringType.get(), "dC")));
 
-  private static final DataFile FILE_3 = new TestDataFile("file_3.avro", Row.of(), 50,
+  private static final DataFile FILE_3 = new TestDataFile(String.format("%s/file_3.avro", dataLocation), Row.of(), 50,
       // any value counts, including nulls
       ImmutableMap.of(3, 20L),
       // null value counts
@@ -102,7 +123,7 @@ public class TestInclusiveMetricsEvaluator {
       // upper bounds
       ImmutableMap.of(3, toByteBuffer(StringType.get(), "3str3")));
 
-  private static final DataFile FILE_4 = new TestDataFile("file_4.avro", Row.of(), 50,
+  private static final DataFile FILE_4 = new TestDataFile(String.format("%s/file_4.avro", dataLocation), Row.of(), 50,
       // any value counts, including nulls
       ImmutableMap.of(3, 20L),
       // null value counts
@@ -112,6 +133,10 @@ public class TestInclusiveMetricsEvaluator {
       // upper bounds
       ImmutableMap.of(3, toByteBuffer(StringType.get(), "イロハニホヘト")));
 
+  @Test
+  public void testBF() {
+    //todo - heihei
+  }
   @Test
   public void testAllNulls() {
     boolean shouldRead = new InclusiveMetricsEvaluator(SCHEMA, notNull("all_nulls")).eval(FILE);

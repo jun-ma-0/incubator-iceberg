@@ -32,6 +32,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.Metrics;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -87,7 +88,7 @@ public class TestFilteredScan {
   private static final HadoopTables TABLES = new HadoopTables(CONF);
 
   private static final Schema SCHEMA = new Schema(
-      Types.NestedField.required(1, "id", Types.LongType.get()),
+      Types.NestedField.required(1, "id", Types.LongType.get(), true, 0.01, 100),
       Types.NestedField.optional(2, "ts", Types.TimestampType.withZone()),
       Types.NestedField.optional(3, "data", Types.StringType.get())
   );

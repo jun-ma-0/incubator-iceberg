@@ -413,28 +413,54 @@ public class Types {
   }
 
   public static class NestedField implements Serializable {
+    //todo - heihei +apis with BF
     public static NestedField optional(int id, String name, Type type) {
-      return new NestedField(true, id, name, type, null);
+      return new NestedField(true, id, name, type, null, false, 0, 0);
+    }
+
+    public static NestedField optional(int id, String name, Type type, boolean isBloomFilterEnabled, double fpp,
+                                       long ndv) {
+      return new NestedField(true, id, name, type, null, isBloomFilterEnabled, fpp, ndv);
     }
 
     public static NestedField optional(int id, String name, Type type, String doc) {
-      return new NestedField(true, id, name, type, doc);
+      return new NestedField(true, id, name, type, doc, false, 0, 0);
+    }
+
+    public static NestedField optional(int id, String name, Type type, String doc,
+                                       boolean isBloomFilterEnabled, double fpp, long ndv) {
+      return new NestedField(true, id, name, type, doc, isBloomFilterEnabled, fpp, ndv);
     }
 
     public static NestedField required(int id, String name, Type type) {
-      return new NestedField(false, id, name, type, null);
+      return new NestedField(false, id, name, type, null, false, 0, 0);
+    }
+
+    public static NestedField required(int id, String name, Type type, boolean isBloomFilterEnabled, double fpp,
+                                       long ndv) {
+      return new NestedField(false, id, name, type, null, isBloomFilterEnabled, fpp, ndv);
     }
 
     public static NestedField required(int id, String name, Type type, String doc) {
-      return new NestedField(false, id, name, type, doc);
+      return new NestedField(false, id, name, type, doc, false, 0, 0);
+    }
+
+    public static NestedField required(int id, String name, Type type, String doc,
+                                       boolean isBloomFilterEnabled, double fpp, long ndv) {
+      return new NestedField(false, id, name, type, doc, isBloomFilterEnabled, fpp, ndv);
     }
 
     public static NestedField of(int id, boolean isOptional, String name, Type type) {
-      return new NestedField(isOptional, id, name, type, null);
+      return new NestedField(isOptional, id, name, type, null, false, 0, 0);
     }
 
     public static NestedField of(int id, boolean isOptional, String name, Type type, String doc) {
-      return new NestedField(isOptional, id, name, type, doc);
+      return new NestedField(isOptional, id, name, type, doc, false, 0, 0);
+    }
+
+    public static NestedField of(int id, boolean isOptional, String name, Type type, String doc,
+                                 boolean isBloomFilterEnabled, double fpp, long ndv) {
+      return new NestedField(isOptional, id, name, type, doc, isBloomFilterEnabled, fpp, ndv);
     }
 
     private final boolean isOptional;
@@ -442,8 +468,13 @@ public class Types {
     private final String name;
     private final Type type;
     private final String doc;
+    private final boolean isBloomFilterEnabled;
+    private final double fpp;
+    private final long ndv;
 
-    private NestedField(boolean isOptional, int id, String name, Type type, String doc) {
+
+    private NestedField(boolean isOptional, int id, String name, Type type, String doc, boolean isBloomFilterEnabled,
+                        double fpp, long ndv) {
       Preconditions.checkNotNull(name, "Name cannot be null");
       Preconditions.checkNotNull(type, "Type cannot be null");
       this.isOptional = isOptional;
@@ -451,6 +482,9 @@ public class Types {
       this.name = name;
       this.type = type;
       this.doc = doc;
+      this.isBloomFilterEnabled = isBloomFilterEnabled;
+      this.fpp = fpp;
+      this.ndv = ndv;
     }
 
     public boolean isOptional() {
@@ -477,11 +511,24 @@ public class Types {
       return doc;
     }
 
+    public boolean isBloomFilterEnabled() {
+      return isBloomFilterEnabled;
+    }
+
+    public double fpp() {
+      return fpp;
+    }
+
+    public long ndv() {
+      return ndv;
+    }
+
     @Override
     public String toString() {
-      return String.format("%d: %s: %s %s",
-          id, name, isOptional ? "optional" : "required", type) +
-          (doc != null ? " (" + doc + ")" : "");
+      return String.format("%d: %s: %s %s %s(fpp: %f, ndv: %d) %s",
+          id, name, isOptional ? "optional" : "required", type,
+          isBloomFilterEnabled ? "bloomFilterEnabled" : "bloomFilterDisabled", fpp, ndv,
+          doc != null ? " (" + doc + ")" : "");
     }
 
     @Override
@@ -501,13 +548,19 @@ public class Types {
         return false;
       } else if (!Objects.equals(doc, that.doc)) {
         return false;
+      } else if (isBloomFilterEnabled != that.isBloomFilterEnabled) {
+        return false;
+      } else if (fpp != that.fpp) {
+        return false;
+      } else if (ndv != that.ndv) {
+        return false;
       }
       return type.equals(that.type);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(NestedField.class, id, isOptional, name, type);
+      return Objects.hash(NestedField.class, id, isOptional, name, type, isBloomFilterEnabled, fpp, ndv);
     }
   }
 
@@ -644,9 +697,23 @@ public class Types {
   }
 
   public static class ListType extends NestedType {
+    public static ListType ofOptional(int elementId, Type elementType, boolean isBloomFilterEnabled, double fpp,
+                                      long ndv) {
+      Preconditions.checkNotNull(elementType, "Element type cannot be null");
+      return new ListType(NestedField.optional(
+          elementId, "element", elementType, isBloomFilterEnabled, fpp, ndv));
+    }
+
     public static ListType ofOptional(int elementId, Type elementType) {
       Preconditions.checkNotNull(elementType, "Element type cannot be null");
       return new ListType(NestedField.optional(elementId, "element", elementType));
+    }
+
+    public static ListType ofRequired(int elementId, Type elementType, boolean isBloomFilterEnabled, double fpp,
+                                      long ndv) {
+      Preconditions.checkNotNull(elementType, "Element type cannot be null");
+      return new ListType(NestedField.required(
+          elementId, "element", elementType, isBloomFilterEnabled, fpp, ndv));
     }
 
     public static ListType ofRequired(int elementId, Type elementType) {
@@ -696,6 +763,18 @@ public class Types {
 
     public boolean isElementOptional() {
       return elementField.isOptional;
+    }
+
+    public boolean isElementEnabledBloomFilter() {
+      return elementField.isBloomFilterEnabled;
+    }
+
+    public long elementNDV() {
+      return elementField.ndv;
+    }
+
+    public double elementFPP() {
+      return elementField.fpp;
     }
 
     @Override
@@ -815,6 +894,10 @@ public class Types {
     public boolean isValueOptional() {
       return valueField.isOptional;
     }
+
+    public NestedField keyField() { return keyField; }
+
+    public NestedField valueField() { return valueField; }
 
     @Override
     public TypeID typeId() {

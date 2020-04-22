@@ -29,6 +29,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Metrics;
 import org.apache.iceberg.MetricsConfig;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.iceberg.common.DynConstructors;
 import org.apache.iceberg.common.DynMethods;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -77,6 +78,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
   private final MessageType parquetSchema;
   private final ParquetValueWriter<T> model;
   private final ParquetFileWriter writer;
+  private final BloomFilterWriterStore bloomFilterWriterStore;
   private final MetricsConfig metricsConfig;
   private final int columnIndexTruncateLength;
 
@@ -106,6 +108,10 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
     this.model = (ParquetValueWriter<T>) createWriterFunc.apply(parquetSchema);
     this.metricsConfig = metricsConfig;
     this.columnIndexTruncateLength = conf.getInt(COLUMN_INDEX_TRUNCATE_LENGTH, DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH);
+    this.bloomFilterWriterStore = new BloomFilterWriterStore(
+        schema, BloomFilterWriterStore.getBloomFilterBasePathFromFilePath(output.location()));
+
+    this.model.setBloomFilterWriterStore(bloomFilterWriterStore);
 
     try {
       this.writer = new ParquetFileWriter(ParquetIO.file(output, conf), parquetSchema,
@@ -203,6 +209,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
   public void close() throws IOException {
     flushRowGroup(true);
     writeStore.close();
+    bloomFilterWriterStore.close();
     writer.end(metadata);
   }
 }

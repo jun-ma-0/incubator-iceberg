@@ -20,6 +20,8 @@
 package org.apache.iceberg.parquet;
 
 import java.util.List;
+
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.parquet.column.ColumnWriteStore;
 
 public interface ParquetValueWriter<T> {
@@ -28,4 +30,6 @@ public interface ParquetValueWriter<T> {
   List<TripleWriter<?>> columns();
 
   void setColumnStore(ColumnWriteStore columnStore);
+
+  void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore);
 }

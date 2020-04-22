@@ -53,6 +53,9 @@ public class SchemaParser {
   private static final String KEY_ID = "key-id";
   private static final String VALUE_ID = "value-id";
   private static final String REQUIRED = "required";
+  private static final String BLOOM_FILTER_ENABLED = "bloom-filter-enabled";
+  private static final String FPP = "fpp";
+  private static final String NDV = "ndv";
   private static final String ELEMENT_REQUIRED = "element-required";
   private static final String VALUE_REQUIRED = "value-required";
 
@@ -66,6 +69,9 @@ public class SchemaParser {
       generator.writeNumberField(ID, field.fieldId());
       generator.writeStringField(NAME, field.name());
       generator.writeBooleanField(REQUIRED, field.isRequired());
+      generator.writeBooleanField(BLOOM_FILTER_ENABLED, field.isBloomFilterEnabled());
+      generator.writeNumberField(FPP, field.fpp());
+      generator.writeNumberField(NDV, field.ndv());
       generator.writeFieldName(TYPE);
       toJson(field.type(), generator);
       if (field.doc() != null) {
@@ -87,6 +93,9 @@ public class SchemaParser {
     generator.writeFieldName(ELEMENT);
     toJson(list.elementType(), generator);
     generator.writeBooleanField(ELEMENT_REQUIRED, !list.isElementOptional());
+    generator.writeBooleanField(BLOOM_FILTER_ENABLED, list.isElementEnabledBloomFilter());
+    generator.writeNumberField(FPP, list.elementFPP());
+    generator.writeNumberField(NDV, list.elementNDV());
 
     generator.writeEndObject();
   }
@@ -99,11 +108,17 @@ public class SchemaParser {
     generator.writeNumberField(KEY_ID, map.keyId());
     generator.writeFieldName(KEY);
     toJson(map.keyType(), generator);
+    generator.writeBooleanField(BLOOM_FILTER_ENABLED, map.keyField().isBloomFilterEnabled());
+    generator.writeNumberField(FPP, map.keyField().fpp());
+    generator.writeNumberField(NDV, map.keyField().ndv());
 
     generator.writeNumberField(VALUE_ID, map.valueId());
     generator.writeFieldName(VALUE);
     toJson(map.valueType(), generator);
     generator.writeBooleanField(VALUE_REQUIRED, !map.isValueOptional());
+    generator.writeBooleanField(BLOOM_FILTER_ENABLED, map.valueField().isBloomFilterEnabled());
+    generator.writeNumberField(FPP, map.valueField().fpp());
+    generator.writeNumberField(NDV, map.valueField().ndv());
 
     generator.writeEndObject();
   }
@@ -193,10 +208,13 @@ public class SchemaParser {
 
       String doc = JsonUtil.getStringOrNull(DOC, field);
       boolean isRequired = JsonUtil.getBool(REQUIRED, field);
+      boolean isBloomFilterEnabled = JsonUtil.getBool(BLOOM_FILTER_ENABLED, field);
+      double fpp = JsonUtil.getDouble(FPP, field);
+      long ndv = JsonUtil.getLong(NDV, field);
       if (isRequired) {
-        fields.add(Types.NestedField.required(id, name, type, doc));
+        fields.add(Types.NestedField.required(id, name, type, doc, isBloomFilterEnabled, fpp, ndv));
       } else {
-        fields.add(Types.NestedField.optional(id, name, type, doc));
+        fields.add(Types.NestedField.optional(id, name, type, doc, isBloomFilterEnabled, fpp, ndv));
       }
     }
 
@@ -208,11 +226,14 @@ public class SchemaParser {
     int elementId = JsonUtil.getInt(ELEMENT_ID, json);
     Type elementType = typeFromJson(json.get(ELEMENT));
     boolean isRequired = JsonUtil.getBool(ELEMENT_REQUIRED, json);
+    boolean isBloomFilterEnabled = JsonUtil.getBool(BLOOM_FILTER_ENABLED, json);
+    double fpp = JsonUtil.getDouble(FPP, json);
+    long ndv = JsonUtil.getLong(NDV, json);
 
     if (isRequired) {
-      return Types.ListType.ofRequired(elementId, elementType);
+      return Types.ListType.ofRequired(elementId, elementType, isBloomFilterEnabled,fpp, ndv);
     } else {
-      return Types.ListType.ofOptional(elementId, elementType);
+      return Types.ListType.ofOptional(elementId, elementType, isBloomFilterEnabled,fpp, ndv);
     }
   }
 

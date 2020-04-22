@@ -117,40 +117,41 @@ public class GenericParquetWriter {
     @Override
     public ParquetValueWriter<?> primitive(PrimitiveType primitive) {
       ColumnDescriptor desc = type.getColumnDescription(currentPath());
+      int fieldId = primitive.getId().intValue();
 
       if (primitive.getOriginalType() != null) {
         switch (primitive.getOriginalType()) {
           case ENUM:
           case JSON:
           case UTF8:
-            return ParquetValueWriters.strings(desc);
+            return ParquetValueWriters.strings(desc, fieldId);
           case INT_8:
           case INT_16:
           case INT_32:
           case INT_64:
-            return ParquetValueWriters.unboxed(desc);
+            return ParquetValueWriters.unboxed(desc, fieldId);
           case DATE:
-            return new DateWriter(desc);
+            return new DateWriter(desc, fieldId);
           case TIME_MICROS:
-            return new TimeWriter(desc);
+            return new TimeWriter(desc, fieldId);
           case TIMESTAMP_MICROS:
-            return new TimestamptzWriter(desc);
+            return new TimestamptzWriter(desc, fieldId);
           case DECIMAL:
             DecimalMetadata decimal = primitive.getDecimalMetadata();
             switch (primitive.getPrimitiveTypeName()) {
               case INT32:
-                return ParquetValueWriters.decimalAsInteger(desc, decimal.getPrecision(), decimal.getScale());
+                return ParquetValueWriters.decimalAsInteger(desc, decimal.getPrecision(), decimal.getScale(), fieldId);
               case INT64:
-                return ParquetValueWriters.decimalAsLong(desc, decimal.getPrecision(), decimal.getScale());
+                return ParquetValueWriters.decimalAsLong(desc, decimal.getPrecision(), decimal.getScale(), fieldId);
               case BINARY:
               case FIXED_LEN_BYTE_ARRAY:
-                return ParquetValueWriters.decimalAsFixed(desc, decimal.getPrecision(), decimal.getScale());
+                return ParquetValueWriters.decimalAsFixed(desc, decimal.getPrecision(), decimal.getScale(), fieldId);
               default:
                 throw new UnsupportedOperationException(
                     "Unsupported base type for decimal: " + primitive.getPrimitiveTypeName());
             }
           case BSON:
-            return ParquetValueWriters.byteBuffers(desc);
+            return ParquetValueWriters.byteBuffers(desc, fieldId);
           default:
             throw new UnsupportedOperationException(
                 "Unsupported logical type: " + primitive.getOriginalType());
@@ -159,15 +160,15 @@ public class GenericParquetWriter {
 
       switch (primitive.getPrimitiveTypeName()) {
         case FIXED_LEN_BYTE_ARRAY:
-          return new FixedWriter(desc);
+          return new FixedWriter(desc, fieldId);
         case BINARY:
-          return ParquetValueWriters.byteBuffers(desc);
+          return ParquetValueWriters.byteBuffers(desc, fieldId);
         case BOOLEAN:
         case INT32:
         case INT64:
         case FLOAT:
         case DOUBLE:
-          return ParquetValueWriters.unboxed(desc);
+          return ParquetValueWriters.unboxed(desc, fieldId);
         default:
           throw new UnsupportedOperationException("Unsupported type: " + primitive);
       }
@@ -204,8 +205,8 @@ public class GenericParquetWriter {
   private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
 
   private static class DateWriter extends PrimitiveWriter<LocalDate> {
-    private DateWriter(ColumnDescriptor desc) {
-      super(desc);
+    private DateWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -215,8 +216,8 @@ public class GenericParquetWriter {
   }
 
   private static class TimeWriter extends PrimitiveWriter<LocalTime> {
-    private TimeWriter(ColumnDescriptor desc) {
-      super(desc);
+    private TimeWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -226,8 +227,8 @@ public class GenericParquetWriter {
   }
 
   private static class TimestampWriter extends PrimitiveWriter<LocalDateTime> {
-    private TimestampWriter(ColumnDescriptor desc) {
-      super(desc);
+    private TimestampWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -238,8 +239,8 @@ public class GenericParquetWriter {
   }
 
   private static class TimestamptzWriter extends PrimitiveWriter<OffsetDateTime> {
-    private TimestamptzWriter(ColumnDescriptor desc) {
-      super(desc);
+    private TimestamptzWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -249,8 +250,8 @@ public class GenericParquetWriter {
   }
 
   private static class FixedWriter extends PrimitiveWriter<byte[]> {
-    private FixedWriter(ColumnDescriptor desc) {
-      super(desc);
+    private FixedWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override

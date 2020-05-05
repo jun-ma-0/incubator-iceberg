@@ -36,7 +36,8 @@ import org.apache.iceberg.types.Type.PrimitiveType;
 
 public class Types {
 
-  private Types() {}
+  private Types() {
+  }
 
   private static final ImmutableMap<String, PrimitiveType> TYPES = ImmutableMap
       .<String, PrimitiveType>builder()
@@ -414,27 +415,48 @@ public class Types {
 
   public static class NestedField implements Serializable {
     public static NestedField optional(int id, String name, Type type) {
-      return new NestedField(true, id, name, type, null);
+      return new NestedField(true, id, name, type, null, null);
+    }
+
+    public static NestedField optional(int id, String name, Type type, BloomFilterConfig bfConfig) {
+      return new NestedField(true, id, name, type, null, bfConfig);
     }
 
     public static NestedField optional(int id, String name, Type type, String doc) {
-      return new NestedField(true, id, name, type, doc);
+      return new NestedField(true, id, name, type, doc, null);
+    }
+
+    public static NestedField optional(int id, String name, Type type, String doc, BloomFilterConfig bfConfig) {
+      return new NestedField(true, id, name, type, doc, bfConfig);
     }
 
     public static NestedField required(int id, String name, Type type) {
-      return new NestedField(false, id, name, type, null);
+      return new NestedField(false, id, name, type, null, null);
+    }
+
+    public static NestedField required(int id, String name, Type type, BloomFilterConfig bfConfig) {
+      return new NestedField(false, id, name, type, null, bfConfig);
     }
 
     public static NestedField required(int id, String name, Type type, String doc) {
-      return new NestedField(false, id, name, type, doc);
+      return new NestedField(false, id, name, type, doc, null);
+    }
+
+    public static NestedField required(int id, String name, Type type, String doc, BloomFilterConfig bfConfig) {
+      return new NestedField(false, id, name, type, doc, bfConfig);
     }
 
     public static NestedField of(int id, boolean isOptional, String name, Type type) {
-      return new NestedField(isOptional, id, name, type, null);
+      return new NestedField(isOptional, id, name, type, null, null);
     }
 
     public static NestedField of(int id, boolean isOptional, String name, Type type, String doc) {
-      return new NestedField(isOptional, id, name, type, doc);
+      return new NestedField(isOptional, id, name, type, doc, null);
+    }
+
+    public static NestedField of(int id, boolean isOptional, String name, Type type, String doc,
+                                 BloomFilterConfig bfConfig) {
+      return new NestedField(isOptional, id, name, type, doc, bfConfig);
     }
 
     private final boolean isOptional;
@@ -442,8 +464,9 @@ public class Types {
     private final String name;
     private final Type type;
     private final String doc;
+    private final BloomFilterConfig bfConfig;
 
-    private NestedField(boolean isOptional, int id, String name, Type type, String doc) {
+    private NestedField(boolean isOptional, int id, String name, Type type, String doc, BloomFilterConfig bfConfig) {
       Preconditions.checkNotNull(name, "Name cannot be null");
       Preconditions.checkNotNull(type, "Type cannot be null");
       this.isOptional = isOptional;
@@ -451,6 +474,7 @@ public class Types {
       this.name = name;
       this.type = type;
       this.doc = doc;
+      this.bfConfig = bfConfig;
     }
 
     public boolean isOptional() {
@@ -477,11 +501,18 @@ public class Types {
       return doc;
     }
 
+    public BloomFilterConfig bfConfig() {
+      return bfConfig;
+    }
+
     @Override
     public String toString() {
-      return String.format("%d: %s: %s %s",
-          id, name, isOptional ? "optional" : "required", type) +
-          (doc != null ? " (" + doc + ")" : "");
+      return String.format("%d: %s: %s %s %s(fpp: %f, ndv: %d) %s",
+          id, name, isOptional ? "optional" : "required", type,
+          bfConfig != null && bfConfig.isEnabled ? "bloomFilterEnabled" : "bloomFilterDisabled",
+          bfConfig != null ? bfConfig.fpp : 0.0f,
+          bfConfig != null ? bfConfig.ndv : 0,
+          doc != null ? " (" + doc + ")" : "");
     }
 
     @Override
@@ -501,13 +532,65 @@ public class Types {
         return false;
       } else if (!Objects.equals(doc, that.doc)) {
         return false;
+      } else if (!Objects.equals(bfConfig, that.bfConfig)) {
+        return false;
       }
       return type.equals(that.type);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(NestedField.class, id, isOptional, name, type);
+      return Objects.hash(NestedField.class, id, isOptional, name, type, bfConfig);
+    }
+
+  }
+
+  public static class BloomFilterConfig implements Serializable {
+    private final boolean isEnabled;
+    private final double fpp;
+    private final long ndv;
+
+    public BloomFilterConfig(boolean isEnabled, double fpp, long ndv) {
+      this.isEnabled = isEnabled;
+      this.fpp = fpp;
+      this.ndv = ndv;
+    }
+
+    public boolean isEnabled() {
+      return isEnabled;
+    }
+
+    public double fpp() {
+      return fpp;
+    }
+
+    public long ndv() {
+      return ndv;
+    }
+
+    @Override
+    public String toString() {
+      return String.format("isEnabled: %s, fpp: %f, ndv: %d", isEnabled, fpp, ndv);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      } else if (!(o instanceof BloomFilterConfig)) {
+        return false;
+      }
+
+      BloomFilterConfig that = (BloomFilterConfig) o;
+      if (isEnabled == that.isEnabled && fpp == that.fpp && ndv == that.ndv) {
+        return true;
+      }
+      return false;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(BloomFilterConfig.class, isEnabled, fpp, ndv);
     }
   }
 
@@ -644,9 +727,21 @@ public class Types {
   }
 
   public static class ListType extends NestedType {
+    public static ListType ofOptional(int elementId, Type elementType, BloomFilterConfig bfConfig) {
+      Preconditions.checkNotNull(elementType, "Element type cannot be null");
+      return new ListType(NestedField.optional(
+          elementId, "element", elementType, bfConfig));
+    }
+
     public static ListType ofOptional(int elementId, Type elementType) {
       Preconditions.checkNotNull(elementType, "Element type cannot be null");
       return new ListType(NestedField.optional(elementId, "element", elementType));
+    }
+
+    public static ListType ofRequired(int elementId, Type elementType, BloomFilterConfig bfConfig) {
+      Preconditions.checkNotNull(elementType, "Element type cannot be null");
+      return new ListType(NestedField.required(
+          elementId, "element", elementType, bfConfig));
     }
 
     public static ListType ofRequired(int elementId, Type elementType) {
@@ -696,6 +791,10 @@ public class Types {
 
     public boolean isElementOptional() {
       return elementField.isOptional;
+    }
+
+    public BloomFilterConfig bfConfig() {
+      return elementField.bfConfig;
     }
 
     @Override
@@ -749,6 +848,14 @@ public class Types {
       return new MapType(
           NestedField.required(keyId, "key", keyType),
           NestedField.optional(valueId, "value", valueType));
+    }
+
+    public static MapType ofOptional(int keyId, int valueId, Type keyType, Type valueType,
+                                     BloomFilterConfig keyBfConfig, BloomFilterConfig valueBfConfig) {
+      Preconditions.checkNotNull(valueType, "Value type cannot be null");
+      return new MapType(
+          NestedField.required(keyId, "key", keyType, keyBfConfig),
+          NestedField.optional(valueId, "value", valueType, valueBfConfig));
     }
 
     public static MapType ofRequired(int keyId, int valueId, Type keyType, Type valueType) {
@@ -814,6 +921,14 @@ public class Types {
 
     public boolean isValueOptional() {
       return valueField.isOptional;
+    }
+
+    public NestedField keyField() {
+      return keyField;
+    }
+
+    public NestedField valueField() {
+      return valueField;
     }
 
     @Override

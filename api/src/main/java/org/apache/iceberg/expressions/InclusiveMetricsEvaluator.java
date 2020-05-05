@@ -19,12 +19,15 @@
 
 package org.apache.iceberg.expressions;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Set;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.bf.BloomFilter;
+import org.apache.iceberg.bf.BloomFilterReader;
 import org.apache.iceberg.expressions.ExpressionVisitors.BoundExpressionVisitor;
 import org.apache.iceberg.types.Comparators;
 import org.apache.iceberg.types.Conversions;
@@ -78,6 +81,10 @@ public class InclusiveMetricsEvaluator {
     return visitor().eval(file);
   }
 
+  public boolean eval(DataFile file, String bloomFilterBaseLocation) {
+    return visitor().eval(file, bloomFilterBaseLocation);
+  }
+
   private static final boolean ROWS_MIGHT_MATCH = true;
   private static final boolean ROWS_CANNOT_MATCH = false;
 
@@ -86,6 +93,7 @@ public class InclusiveMetricsEvaluator {
     private Map<Integer, Long> nullCounts = null;
     private Map<Integer, ByteBuffer> lowerBounds = null;
     private Map<Integer, ByteBuffer> upperBounds = null;
+    private Map<Integer, BloomFilter> bloomFilters = null;
 
     private boolean eval(DataFile file) {
       if (file.recordCount() <= 0) {
@@ -98,6 +106,19 @@ public class InclusiveMetricsEvaluator {
       this.upperBounds = file.upperBounds();
 
       return ExpressionVisitors.visitEvaluator(expr, this);
+    }
+
+    private boolean eval(DataFile file, String bloomFilterBaseLocation) {
+      // todo - Currently BF file path is not stored anywhere. Both the reader and writer construct path using the same
+      //  mechanism. Do we need to add bloom filter columns into data file struct, so that we can have a list of all
+      //  the bloom files?
+      try {
+        this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, bloomFilterBaseLocation);
+      } catch (IOException e) {
+        throw new RuntimeException(String.format("Unable to load bloom filters for file %s", file.path()), e);
+      }
+
+      return eval(file);
     }
 
     @Override
@@ -253,6 +274,14 @@ public class InclusiveMetricsEvaluator {
 
         int cmp = lit.comparator().compare(upper, lit.value());
         if (cmp < 0) {
+          return ROWS_CANNOT_MATCH;
+        }
+      }
+
+      if (bloomFilters != null && bloomFilters.containsKey(id)) {
+        BloomFilter bf = bloomFilters.get(id);
+        long hash = bf.hash(lit.value());
+        if (!bf.findHash(hash)) {
           return ROWS_CANNOT_MATCH;
         }
       }

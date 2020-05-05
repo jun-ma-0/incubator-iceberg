@@ -55,6 +55,13 @@ public class TestParquetWrite {
       optional(2, "data", Types.StringType.get())
   );
 
+//  private static final Schema SCHEMA_WITH_MAP = new Schema(
+//      optional(1, "id", Types.IntegerType.get(), new Types.BloomFilterConfig(true,0.01, 100)),
+//      optional(2, "data", Types.StringType.get()),
+//      optional(3, "properties",
+//          Types.MapType.ofOptional(4, 5, Types.StringType.get(), Types.StringType.get()))
+//  );
+
   @Rule
   public TemporaryFolder temp = new TemporaryFolder();
 
@@ -116,6 +123,53 @@ public class TestParquetWrite {
       }
     }
   }
+
+//  @Test
+//  public void testBasicWriteMap() throws IOException {
+//    File parent = temp.newFolder("parquet");
+//    File location = new File(parent, "test");
+//
+//    HadoopTables tables = new HadoopTables(CONF);
+//    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA_WITH_MAP).identity("data").build();
+//    Table table = tables.create(SCHEMA_WITH_MAP, spec, location.toString());
+//
+//    Map<String, String> properties = ImmutableMap.of("a", "A", "b", "B");
+//
+//    List<SimpleRecordWithMap> expected = Lists.newArrayList(
+//        new SimpleRecordWithMap(1, "a", properties),
+//        new SimpleRecordWithMap(2, "b", properties),
+//        new SimpleRecordWithMap(3, "c", properties)
+//    );
+//
+//    Dataset<Row> df = spark.createDataFrame(expected, SimpleRecordWithMap.class);
+//
+//    // TODO: incoming columns must be ordered according to the table's schema
+//    df.select("id", "data", "properties").write()
+//        .format("iceberg")
+//        .mode("append")
+//        .save(location.toString());
+//
+//    table.refresh();
+//
+//    Dataset<Row> result = spark.read()
+//        .format("iceberg")
+//        .load(location.toString());
+//
+//    List<SimpleRecord> actual = result.orderBy("id").as(Encoders.bean(SimpleRecord.class)).collectAsList();
+//    Assert.assertEquals("Number of rows should match", expected.size(), actual.size());
+//    Assert.assertEquals("Result rows should match", expected, actual);
+//    for (ManifestFile manifest : table.currentSnapshot().manifests()) {
+//      for (DataFile file : ManifestReader.read(manifest, table.io())) {
+//        Assert.assertNotNull("Split offsets not present", file.splitOffsets());
+//        Assert.assertEquals("Should have reported record count as 1", 1, file.recordCount());
+//        Assert.assertNotNull("Column sizes metric not present", file.columnSizes());
+//        Assert.assertNotNull("Counts metric not present", file.valueCounts());
+//        Assert.assertNotNull("Null value counts metric not present", file.nullValueCounts());
+//        Assert.assertNotNull("Lower bounds metric not present", file.lowerBounds());
+//        Assert.assertNotNull("Upper bounds metric not present", file.upperBounds());
+//      }
+//    }
+//  }
 
   @Test
   public void testAppend() throws IOException {

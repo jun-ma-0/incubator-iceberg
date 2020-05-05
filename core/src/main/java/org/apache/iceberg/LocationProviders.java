@@ -45,12 +45,21 @@ public class LocationProviders {
   }
 
   static class DefaultLocationProvider implements LocationProvider {
+    private final String tableLoacation;
     private final String dataLocation;
+    private final String metadataLocation;
 
     DefaultLocationProvider(String tableLocation, Map<String, String> properties) {
+      this.tableLoacation = tableLocation;
       this.dataLocation = stripTrailingSlash(properties.getOrDefault(
           TableProperties.WRITE_NEW_DATA_LOCATION,
           String.format("%s/data", tableLocation)));
+      this.metadataLocation = String.format("%s/metadata", tableLocation);
+    }
+
+    @Override
+    public String newDataLocation(String filename) {
+      return String.format("%s/%s", dataLocation, filename);
     }
 
     @Override
@@ -59,8 +68,18 @@ public class LocationProviders {
     }
 
     @Override
-    public String newDataLocation(String filename) {
-      return String.format("%s/%s", dataLocation, filename);
+    public String getTableLocation() {
+      return tableLoacation;
+    }
+
+    @Override
+    public String bloomFilterBaseLocation(String fileName) {
+      return String.format("%s/bloomFilters/%s", metadataLocation, fileName);
+    }
+
+    @Override
+    public String bloomFilterBaseLocation(String fileName, PartitionSpec spec, StructLike partitionData) {
+      return String.format("%s/bloomFilters/%s/%s", metadataLocation, spec.partitionToPath(partitionData), fileName);
     }
   }
 
@@ -68,11 +87,15 @@ public class LocationProviders {
     private static final Transform<String, Integer> HASH_FUNC = Transforms
         .bucket(Types.StringType.get(), Integer.MAX_VALUE);
 
+    private final String tableLoacation;
     private final String storageLocation;
+    private final String metadataLocation;
     private final String context;
 
     ObjectStoreLocationProvider(String tableLocation, Map<String, String> properties) {
+      this.tableLoacation = tableLocation;
       this.storageLocation = stripTrailingSlash(properties.get(OBJECT_STORE_PATH));
+      this.metadataLocation = String.format("%s/metadata", tableLocation);
       this.context = pathContext(tableLocation);
     }
 
@@ -85,6 +108,21 @@ public class LocationProviders {
     public String newDataLocation(String filename) {
       int hash = HASH_FUNC.apply(filename);
       return String.format("%s/%08x/%s/%s", storageLocation, hash, context, filename);
+    }
+
+    @Override
+    public String getTableLocation() {
+      return tableLoacation;
+    }
+
+    @Override
+    public String bloomFilterBaseLocation(String fileName) {
+      return String.format("%s/bloomFilters/%s", metadataLocation, fileName);
+    }
+
+    @Override
+    public String bloomFilterBaseLocation(String fileName, PartitionSpec spec, StructLike partitionData) {
+      return String.format("%s/bloomFilters/%s/%s", metadataLocation, spec.partitionToPath(partitionData), fileName);
     }
 
     private static String pathContext(String tableLocation) {

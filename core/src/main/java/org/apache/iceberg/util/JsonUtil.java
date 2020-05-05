@@ -78,6 +78,14 @@ public class JsonUtil {
     return pNode.asBoolean();
   }
 
+  public static double getDouble(String property, JsonNode node) {
+    Preconditions.checkArgument(node.has(property), "Cannot parse missing double %s", property);
+    JsonNode pNode = node.get(property);
+    Preconditions.checkArgument(pNode != null && !pNode.isNull() && pNode.isDouble(),
+        "Cannot parse %s from non-double value: %s", property, pNode);
+    return pNode.asDouble();
+  }
+
   public static String getString(String property, JsonNode node) {
     Preconditions.checkArgument(node.has(property), "Cannot parse missing string %s", property);
     JsonNode pNode = node.get(property);

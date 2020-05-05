@@ -17,18 +17,54 @@
  * under the License.
  */
 
-package org.apache.iceberg.parquet;
+package org.apache.iceberg.bf;
 
-import java.util.List;
-import org.apache.iceberg.bf.BloomFilterWriterStore;
-import org.apache.parquet.column.ColumnWriteStore;
+import java.io.IOException;
 
-public interface ParquetValueWriter<T> {
-  void write(int repetitionLevel, T value);
+/**
+ * Defines the Bloom Filter data structure. It usually contains a bit array and one or more hash function(s).
+ */
+public interface BloomFilter<T> {
 
-  List<TripleWriter<?>> columns();
+  enum HashStrategy {
+    XXH64;
 
-  void setColumnStore(ColumnWriteStore columnStore);
+    @Override
+    public String toString() {
+      return "xxhash";
+    }
+  }
 
-  void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore);
+  enum Algorithm {
+    BLOCK;
+
+    @Override
+    public String toString() {
+      return "block";
+    }
+  }
+
+  void write() throws IOException;
+
+  long hash(T value);
+
+  long hash(int value);
+
+  long hash(long value);
+
+  long hash(double value);
+
+  long hash(float value);
+
+  long hash(String value);
+
+  void insertHash(long hash);
+
+  boolean findHash(long hash);
+
+  Algorithm getAlgorithm();
+
+  HashStrategy getHashStrategy();
+
+  int getBitsetSize();
 }

@@ -19,6 +19,8 @@
 
 package org.apache.iceberg.parquet;
 
+import org.apache.iceberg.bf.BloomFilterWriter;
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.ColumnWriteStore;
 import org.apache.parquet.io.api.Binary;
@@ -80,6 +82,8 @@ public abstract class ColumnWriter<T> implements TripleWriter<T> {
   private final int maxDefinitionLevel;
 
   private org.apache.parquet.column.ColumnWriter columnWriter = null;
+  private boolean isBloomFilterEnabled = false;
+  private BloomFilterWriter bloomFilterWriter = null;
 
   private ColumnWriter(ColumnDescriptor desc) {
     this.desc = desc;
@@ -90,6 +94,13 @@ public abstract class ColumnWriter<T> implements TripleWriter<T> {
     this.columnWriter = columnStore.getColumnWriter(desc);
   }
 
+  public void setBloomFilterWriter(BloomFilterWriterStore bloomFilterWriterStore, int fieldId) {
+    if (bloomFilterWriterStore.getBloomFilterWriter(fieldId) != null) {
+      this.bloomFilterWriter = bloomFilterWriterStore.getBloomFilterWriter(fieldId);
+      this.isBloomFilterEnabled = true;
+    }
+  }
+
   @Override
   public void writeBoolean(int rl, boolean value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
@@ -98,26 +109,41 @@ public abstract class ColumnWriter<T> implements TripleWriter<T> {
   @Override
   public void writeInteger(int rl, int value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
+    if (isBloomFilterEnabled) {
+      bloomFilterWriter.write(value);
+    }
   }
 
   @Override
   public void writeLong(int rl, long value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
+    if (isBloomFilterEnabled) {
+      bloomFilterWriter.write(value);
+    }
   }
 
   @Override
   public void writeFloat(int rl, float value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
+    if (isBloomFilterEnabled) {
+      bloomFilterWriter.write(value);
+    }
   }
 
   @Override
   public void writeDouble(int rl, double value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
+    if (isBloomFilterEnabled) {
+      bloomFilterWriter.write(value);
+    }
   }
 
   @Override
   public void writeBinary(int rl, Binary value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
+    if (isBloomFilterEnabled) {
+      bloomFilterWriter.write(value.toString());
+    }
   }
 
   @Override

@@ -36,7 +36,8 @@ import org.apache.iceberg.util.JsonUtil;
 
 public class SchemaParser {
 
-  private SchemaParser() {}
+  private SchemaParser() {
+  }
 
   private static final String TYPE = "type";
   private static final String STRUCT = "struct";
@@ -53,6 +54,12 @@ public class SchemaParser {
   private static final String KEY_ID = "key-id";
   private static final String VALUE_ID = "value-id";
   private static final String REQUIRED = "required";
+  private static final String BLOOM_FILTER = "bloom-filter";
+  private static final String KEY_BLOOM_FILTER = "key-bloom-filter";
+  private static final String VALUE_BLOOM_FILTER = "value-bloom-filter";
+  private static final String BLOOM_FILTER_ENABLED = "enabled";
+  private static final String FPP = "fpp";
+  private static final String NDV = "ndv";
   private static final String ELEMENT_REQUIRED = "element-required";
   private static final String VALUE_REQUIRED = "value-required";
 
@@ -71,6 +78,14 @@ public class SchemaParser {
       if (field.doc() != null) {
         generator.writeStringField(DOC, field.doc());
       }
+      if (field.bfConfig() != null && field.bfConfig().isEnabled()) {
+        generator.writeFieldName(BLOOM_FILTER);
+        generator.writeStartObject();
+        generator.writeBooleanField(BLOOM_FILTER_ENABLED, field.bfConfig().isEnabled());
+        generator.writeNumberField(FPP, field.bfConfig().fpp());
+        generator.writeNumberField(NDV, field.bfConfig().ndv());
+        generator.writeEndObject();
+      }
       generator.writeEndObject();
     }
     generator.writeEndArray();
@@ -87,6 +102,14 @@ public class SchemaParser {
     generator.writeFieldName(ELEMENT);
     toJson(list.elementType(), generator);
     generator.writeBooleanField(ELEMENT_REQUIRED, !list.isElementOptional());
+    if (list.bfConfig() != null && list.bfConfig().isEnabled()) {
+      generator.writeFieldName(BLOOM_FILTER);
+      generator.writeStartObject();
+      generator.writeBooleanField(BLOOM_FILTER_ENABLED, list.bfConfig().isEnabled());
+      generator.writeNumberField(FPP, list.bfConfig().fpp());
+      generator.writeNumberField(NDV, list.bfConfig().ndv());
+      generator.writeEndObject();
+    }
 
     generator.writeEndObject();
   }
@@ -99,12 +122,26 @@ public class SchemaParser {
     generator.writeNumberField(KEY_ID, map.keyId());
     generator.writeFieldName(KEY);
     toJson(map.keyType(), generator);
-
+    if (map.keyField().bfConfig() != null && map.keyField().bfConfig().isEnabled()) {
+      generator.writeFieldName(KEY_BLOOM_FILTER);
+      generator.writeStartObject();
+      generator.writeBooleanField(BLOOM_FILTER_ENABLED, map.keyField().bfConfig().isEnabled());
+      generator.writeNumberField(FPP, map.keyField().bfConfig().fpp());
+      generator.writeNumberField(NDV, map.keyField().bfConfig().ndv());
+      generator.writeEndObject();
+    }
     generator.writeNumberField(VALUE_ID, map.valueId());
     generator.writeFieldName(VALUE);
     toJson(map.valueType(), generator);
     generator.writeBooleanField(VALUE_REQUIRED, !map.isValueOptional());
-
+    generator.writeFieldName(VALUE_BLOOM_FILTER);
+    generator.writeStartObject();
+    if (map.valueField().bfConfig() != null && map.valueField().bfConfig().isEnabled()) {
+      generator.writeBooleanField(BLOOM_FILTER_ENABLED, map.valueField().bfConfig().isEnabled());
+      generator.writeNumberField(FPP, map.valueField().bfConfig().fpp());
+      generator.writeNumberField(NDV, map.valueField().bfConfig().ndv());
+    }
+    generator.writeEndObject();
     generator.writeEndObject();
   }
 
@@ -175,6 +212,16 @@ public class SchemaParser {
     throw new IllegalArgumentException("Cannot parse type from json: " + json);
   }
 
+  private static Types.BloomFilterConfig bloomFilterFromJson(JsonNode json) {
+    if (!json.isObject()) {
+      throw new IllegalArgumentException("Cannot parse bloomFilter from json: " + json);
+    }
+    boolean isEnabled = json.get(BLOOM_FILTER_ENABLED).asBoolean();
+    double fpp = json.get(FPP).asDouble();
+    long ndv = json.get(NDV).asLong();
+    return new Types.BloomFilterConfig(isEnabled, fpp, ndv);
+  }
+
   private static Types.StructType structFromJson(JsonNode json) {
     JsonNode fieldArray = json.get(FIELDS);
     Preconditions.checkArgument(fieldArray.isArray(),
@@ -190,13 +237,17 @@ public class SchemaParser {
       int id = JsonUtil.getInt(ID, field);
       String name = JsonUtil.getString(NAME, field);
       Type type = typeFromJson(field.get(TYPE));
+      Types.BloomFilterConfig bfConfig = null;
+      if (field.has(BLOOM_FILTER)) {
+        bfConfig = bloomFilterFromJson(field.get(BLOOM_FILTER));
+      }
 
       String doc = JsonUtil.getStringOrNull(DOC, field);
       boolean isRequired = JsonUtil.getBool(REQUIRED, field);
       if (isRequired) {
-        fields.add(Types.NestedField.required(id, name, type, doc));
+        fields.add(Types.NestedField.required(id, name, type, doc, bfConfig));
       } else {
-        fields.add(Types.NestedField.optional(id, name, type, doc));
+        fields.add(Types.NestedField.optional(id, name, type, doc, bfConfig));
       }
     }
 
@@ -209,10 +260,15 @@ public class SchemaParser {
     Type elementType = typeFromJson(json.get(ELEMENT));
     boolean isRequired = JsonUtil.getBool(ELEMENT_REQUIRED, json);
 
+    Types.BloomFilterConfig bfConfig = null;
+    if (json.has(BLOOM_FILTER)) {
+      bfConfig = bloomFilterFromJson(json.get(BLOOM_FILTER));
+    }
+
     if (isRequired) {
-      return Types.ListType.ofRequired(elementId, elementType);
+      return Types.ListType.ofRequired(elementId, elementType, bfConfig);
     } else {
-      return Types.ListType.ofOptional(elementId, elementType);
+      return Types.ListType.ofOptional(elementId, elementType, bfConfig);
     }
   }
 
@@ -233,7 +289,7 @@ public class SchemaParser {
   }
 
   public static Schema fromJson(JsonNode json) {
-    Type type  = typeFromJson(json);
+    Type type = typeFromJson(json);
     Preconditions.checkArgument(type.isNestedType() && type.asNestedType().isStructType(),
         "Cannot create schema, not a struct type: %s", type);
     return new Schema(type.asNestedType().asStructType().fields());

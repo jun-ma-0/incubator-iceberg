@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import org.apache.avro.util.Utf8;
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.ColumnWriteStore;
@@ -49,31 +50,31 @@ public class ParquetValueWriters {
     return writer;
   }
 
-  public static <T> UnboxedWriter<T> unboxed(ColumnDescriptor desc) {
-    return new UnboxedWriter<>(desc);
+  public static <T> UnboxedWriter<T> unboxed(ColumnDescriptor desc, int fieldId) {
+    return new UnboxedWriter<>(desc, fieldId);
   }
 
-  public static PrimitiveWriter<CharSequence> strings(ColumnDescriptor desc) {
-    return new StringWriter(desc);
+  public static PrimitiveWriter<CharSequence> strings(ColumnDescriptor desc, int fieldId) {
+    return new StringWriter(desc, fieldId);
   }
 
   public static PrimitiveWriter<BigDecimal> decimalAsInteger(ColumnDescriptor desc,
-                                                             int precision, int scale) {
-    return new IntegerDecimalWriter(desc, precision, scale);
+                                                             int precision, int scale, int fieldId) {
+    return new IntegerDecimalWriter(desc, precision, scale, fieldId);
   }
 
   public static PrimitiveWriter<BigDecimal> decimalAsLong(ColumnDescriptor desc,
-                                                          int precision, int scale) {
-    return new LongDecimalWriter(desc, precision, scale);
+                                                          int precision, int scale, int fieldId) {
+    return new LongDecimalWriter(desc, precision, scale, fieldId);
   }
 
   public static PrimitiveWriter<BigDecimal> decimalAsFixed(ColumnDescriptor desc,
-                                                           int precision, int scale) {
-    return new FixedDecimalWriter(desc, precision, scale);
+                                                           int precision, int scale, int fieldId) {
+    return new FixedDecimalWriter(desc, precision, scale, fieldId);
   }
 
-  public static PrimitiveWriter<ByteBuffer> byteBuffers(ColumnDescriptor desc) {
-    return new BytesWriter(desc);
+  public static PrimitiveWriter<ByteBuffer> byteBuffers(ColumnDescriptor desc, int fieldId) {
+    return new BytesWriter(desc, fieldId);
   }
 
   public static <E> CollectionWriter<E> collections(int dl, int rl, ParquetValueWriter<E> writer) {
@@ -90,10 +91,12 @@ public class ParquetValueWriters {
     @SuppressWarnings("checkstyle:VisibilityModifier")
     protected final ColumnWriter<T> column;
     private final List<TripleWriter<?>> children;
+    private final int fieldId;
 
-    protected PrimitiveWriter(ColumnDescriptor desc) {
+    protected PrimitiveWriter(ColumnDescriptor desc, int fieldId) {
       this.column = ColumnWriter.newWriter(desc);
       this.children = ImmutableList.of(column);
+      this.fieldId = fieldId;
     }
 
     @Override
@@ -110,11 +113,16 @@ public class ParquetValueWriters {
     public void setColumnStore(ColumnWriteStore columnStore) {
       this.column.setColumnStore(columnStore);
     }
+
+    @Override
+    public void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterWriterStore) {
+      this.column.setBloomFilterWriter(bloomFilterWriterStore, fieldId);
+    }
   }
 
   private static class UnboxedWriter<T> extends PrimitiveWriter<T> {
-    private UnboxedWriter(ColumnDescriptor desc) {
-      super(desc);
+    private UnboxedWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     public void writeBoolean(int repetitionLevel, boolean value) {
@@ -142,8 +150,8 @@ public class ParquetValueWriters {
     private final int precision;
     private final int scale;
 
-    private IntegerDecimalWriter(ColumnDescriptor desc, int precision, int scale) {
-      super(desc);
+    private IntegerDecimalWriter(ColumnDescriptor desc, int precision, int scale, int fieldId) {
+      super(desc, fieldId);
       this.precision = precision;
       this.scale = scale;
     }
@@ -163,8 +171,8 @@ public class ParquetValueWriters {
     private final int precision;
     private final int scale;
 
-    private LongDecimalWriter(ColumnDescriptor desc, int precision, int scale) {
-      super(desc);
+    private LongDecimalWriter(ColumnDescriptor desc, int precision, int scale, int fieldId) {
+      super(desc, fieldId);
       this.precision = precision;
       this.scale = scale;
     }
@@ -186,8 +194,8 @@ public class ParquetValueWriters {
     private final int length;
     private final ThreadLocal<byte[]> bytes;
 
-    private FixedDecimalWriter(ColumnDescriptor desc, int precision, int scale) {
-      super(desc);
+    private FixedDecimalWriter(ColumnDescriptor desc, int precision, int scale, int fieldId) {
+      super(desc, fieldId);
       this.precision = precision;
       this.scale = scale;
       this.length = TypeUtil.decimalRequriedBytes(precision);
@@ -219,8 +227,8 @@ public class ParquetValueWriters {
   }
 
   private static class BytesWriter extends PrimitiveWriter<ByteBuffer> {
-    private BytesWriter(ColumnDescriptor desc) {
-      super(desc);
+    private BytesWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -230,8 +238,8 @@ public class ParquetValueWriters {
   }
 
   private static class StringWriter extends PrimitiveWriter<CharSequence> {
-    private StringWriter(ColumnDescriptor desc) {
-      super(desc);
+    private StringWriter(ColumnDescriptor desc, int fieldId) {
+      super(desc, fieldId);
     }
 
     @Override
@@ -277,6 +285,11 @@ public class ParquetValueWriters {
     @Override
     public void setColumnStore(ColumnWriteStore columnStore) {
       writer.setColumnStore(columnStore);
+    }
+
+    @Override
+    public void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore) {
+      writer.setBloomFilterWriterStore(bloomFilterStore);
     }
   }
 
@@ -329,6 +342,11 @@ public class ParquetValueWriters {
     @Override
     public void setColumnStore(ColumnWriteStore columnStore) {
       writer.setColumnStore(columnStore);
+    }
+
+    @Override
+    public void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore) {
+      writer.setBloomFilterWriterStore(bloomFilterStore);
     }
 
     protected abstract Iterator<E> elements(L value);
@@ -404,6 +422,12 @@ public class ParquetValueWriters {
       valueWriter.setColumnStore(columnStore);
     }
 
+    @Override
+    public void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore) {
+      keyWriter.setBloomFilterWriterStore(bloomFilterStore);
+      valueWriter.setBloomFilterWriterStore(bloomFilterStore);
+    }
+
     protected abstract Iterator<Map.Entry<K, V>> pairs(M value);
   }
 
@@ -455,6 +479,13 @@ public class ParquetValueWriters {
     public void setColumnStore(ColumnWriteStore columnStore) {
       for (ParquetValueWriter<?> writer : writers) {
         writer.setColumnStore(columnStore);
+      }
+    }
+
+    @Override
+    public void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore) {
+      for (ParquetValueWriter<?> writer : writers) {
+        writer.setBloomFilterWriterStore(bloomFilterStore);
       }
     }
 

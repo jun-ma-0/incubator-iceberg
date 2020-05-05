@@ -29,6 +29,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Metrics;
 import org.apache.iceberg.MetricsConfig;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.iceberg.common.DynConstructors;
 import org.apache.iceberg.common.DynMethods;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -64,6 +65,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
   private final MessageType parquetSchema;
   private final ParquetValueWriter<T> model;
   private final ParquetFileWriter writer;
+  private final BloomFilterWriterStore bloomFilterWriterStore;
   private final MetricsConfig metricsConfig;
 
   private DynMethods.BoundMethod flushPageStoreToWriter;
@@ -79,7 +81,8 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
                 CompressionCodecName codec,
                 ParquetProperties properties,
                 MetricsConfig metricsConfig,
-                ParquetFileWriter.Mode writeMode) {
+                ParquetFileWriter.Mode writeMode,
+                String bloomFilterBasePath) {
     this.targetRowGroupSize = rowGroupSize;
     this.props = properties;
     this.metadata = ImmutableMap.copyOf(metadata);
@@ -87,6 +90,10 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
     this.parquetSchema = ParquetSchemaUtil.convert(schema, "table");
     this.model = (ParquetValueWriter<T>) createWriterFunc.apply(parquetSchema);
     this.metricsConfig = metricsConfig;
+    this.bloomFilterWriterStore = new BloomFilterWriterStore(
+        schema, bloomFilterBasePath);
+
+    this.model.setBloomFilterWriterStore(bloomFilterWriterStore);
 
     try {
       this.writer = new ParquetFileWriter(ParquetIO.file(output, conf), parquetSchema,
@@ -184,6 +191,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
   public void close() throws IOException {
     flushRowGroup(true);
     writeStore.close();
+    bloomFilterWriterStore.close();
     writer.end(metadata);
   }
 }

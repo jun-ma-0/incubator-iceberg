@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.io;
 
+import java.io.File;
 import java.io.Serializable;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.StructLike;
@@ -40,10 +41,29 @@ public interface LocationProvider extends Serializable {
   /**
    * Return a fully-qualified data file location for the given partition and filename.
    *
-   * @param spec a partition spec
+   * @param spec          a partition spec
    * @param partitionData a tuple of partition data for data in the file, matching the given spec
-   * @param filename a file name
+   * @param filename      a file name
    * @return a fully-qualified location URI for a data file
    */
   String newDataLocation(PartitionSpec spec, StructLike partitionData, String filename);
+
+  String getTableLocation();
+
+  String bloomFilterBaseLocation(String fileName);
+
+  String bloomFilterBaseLocation(String fileName, PartitionSpec spec, StructLike partitionData);
+
+  static String getBloomFilterBaseLocationFromManifestPath(
+      String manifestPath, String filePath, PartitionSpec spec, StructLike partitionData) {
+    String metadataPath = new File(manifestPath).getParent();
+    String fileName = new File(filePath).getName();
+    return String.format("%s/bloomFilters/%s/%s", metadataPath, spec.partitionToPath(partitionData), fileName);
+  }
+
+  static String getBloomFilterBaseLocationFromTablePath(
+      String tablePath, String filePath, PartitionSpec spec, StructLike partitionData) {
+    String fileName = new File(filePath).getName();
+    return String.format("%s/metadata/bloomFilters/%s/%s", tablePath, spec.partitionToPath(partitionData), fileName);
+  }
 }

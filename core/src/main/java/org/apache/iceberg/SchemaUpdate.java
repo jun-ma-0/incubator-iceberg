@@ -71,6 +71,14 @@ class SchemaUpdate implements UpdateSchema {
     this.lastColumnId = lastColumnId;
   }
 
+  protected Schema schema() {
+    return schema;
+  }
+
+  protected Map<Integer, Types.NestedField> updates() {
+    return updates;
+  }
+
   @Override
   public SchemaUpdate allowIncompatibleChanges() {
     this.allowIncompatibleChanges = true;

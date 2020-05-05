@@ -17,18 +17,26 @@
  * under the License.
  */
 
-package org.apache.iceberg.parquet;
+package org.apache.iceberg.bf;
 
-import java.util.List;
-import org.apache.iceberg.bf.BloomFilterWriterStore;
-import org.apache.parquet.column.ColumnWriteStore;
+import java.nio.ByteBuffer;
 
-public interface ParquetValueWriter<T> {
-  void write(int repetitionLevel, T value);
+/**
+ * A interface contains a set of hash functions used by Bloom filter.
+ */
+public interface HashFunction {
 
-  List<TripleWriter<?>> columns();
+  /**
+   * compute the hash value for a byte array.
+   * @param input the input byte array
+   * @return a result of long value.
+   */
+  long hashBytes(byte[] input);
 
-  void setColumnStore(ColumnWriteStore columnStore);
-
-  void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore);
+  /**
+   * compute the hash value for a ByteBuffer.
+   * @param input the input ByteBuffer
+   * @return a result of long value.
+   */
+  long hashByteBuffer(ByteBuffer input);
 }

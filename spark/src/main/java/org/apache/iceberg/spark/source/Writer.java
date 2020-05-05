@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -42,9 +43,11 @@ import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.ReplacePartitions;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SnapshotUpdate;
+import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.avro.Avro;
+import org.apache.iceberg.bf.BloomFilterReader;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -220,6 +223,16 @@ class Writer implements DataSourceWriter {
         .throwFailureWhenFinished()
         .run(file -> {
           fileIo.deleteFile(file.path().toString());
+
+          String bloomFilterBasePath = LocationProvider.getBloomFilterBaseLocationFromTablePath(
+              table.location(), file.path().toString(), table.spec(), file.partition());
+          Set<Integer> columns = file.nullValueCounts().keySet();
+          for (int columnId : columns) {
+            String bloomFilterPath = String.format("%s-%d", bloomFilterBasePath, columnId);
+            if (BloomFilterReader.bloomFilterExists(bloomFilterPath)) {
+              fileIo.deleteFile(bloomFilterPath);
+            }
+          }
         });
   }
 
@@ -300,15 +313,16 @@ class Writer implements DataSourceWriter {
       AppenderFactory<InternalRow> appenderFactory = new SparkAppenderFactory();
 
       if (spec.fields().isEmpty()) {
-        return new UnpartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
+        return new UnpartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, locations);
       } else {
-        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, dsSchema);
+        return new PartitionedWriter(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, dsSchema,
+            locations);
       }
     }
 
     private class SparkAppenderFactory implements AppenderFactory<InternalRow> {
       @Override
-      public FileAppender<InternalRow> newAppender(OutputFile file, FileFormat fileFormat) {
+      public FileAppender<InternalRow> newAppender(OutputFile file, FileFormat fileFormat, String bloomFilterBasePath) {
         MetricsConfig metricsConfig = MetricsConfig.fromProperties(properties);
         try {
           switch (fileFormat) {
@@ -319,6 +333,7 @@ class Writer implements DataSourceWriter {
                   .metricsConfig(metricsConfig)
                   .schema(dsSchema)
                   .overwrite()
+                  .bloomFilterBasePath(bloomFilterBasePath)
                   .build();
 
             case AVRO:
@@ -355,7 +370,7 @@ class Writer implements DataSourceWriter {
         this.fileCount = 0;
       }
 
-      private String generateFilename() {
+      String generateFilename() {
         return format.addExtension(String.format("%05d-%d-%s-%05d", partitionId, taskId, uuid, fileCount++));
       }
 
@@ -378,7 +393,7 @@ class Writer implements DataSourceWriter {
   }
 
   private interface AppenderFactory<T> {
-    FileAppender<T> newAppender(OutputFile file, FileFormat format);
+    FileAppender<T> newAppender(OutputFile file, FileFormat format, String bloomFilterBasePath);
   }
 
   private abstract static class BaseWriter implements DataWriter<InternalRow> {
@@ -391,28 +406,32 @@ class Writer implements DataSourceWriter {
     private final WriterFactory.OutputFileFactory fileFactory;
     private final FileIO fileIo;
     private final long targetFileSize;
+    private final LocationProvider locations;
     private PartitionKey currentKey = null;
     private FileAppender<InternalRow> currentAppender = null;
     private EncryptedOutputFile currentFile = null;
     private long currentRows = 0;
+    private String bloomFilterBasePath = null;
 
     BaseWriter(PartitionSpec spec, FileFormat format, AppenderFactory<InternalRow> appenderFactory,
-               WriterFactory.OutputFileFactory fileFactory, FileIO fileIo, long targetFileSize) {
+               WriterFactory.OutputFileFactory fileFactory, FileIO fileIo, long targetFileSize,
+               LocationProvider locations) {
       this.spec = spec;
       this.format = format;
       this.appenderFactory = appenderFactory;
       this.fileFactory = fileFactory;
       this.fileIo = fileIo;
       this.targetFileSize = targetFileSize;
+      this.locations = locations;
     }
 
     @Override
     public abstract void write(InternalRow row) throws IOException;
 
-    public void writeInternal(InternalRow row)  throws IOException {
+    public void writeInternal(InternalRow row, StructLike key)  throws IOException {
       if (currentRows % ROWS_DIVISOR == 0 && currentAppender.length() >= targetFileSize) {
         closeCurrent();
-        openCurrent();
+        openCurrent(key);
       }
 
       currentAppender.add(row);
@@ -434,18 +453,31 @@ class Writer implements DataSourceWriter {
       Tasks.foreach(completedFiles)
           .throwFailureWhenFinished()
           .noRetry()
-          .run(file -> fileIo.deleteFile(file.path().toString()));
+          .run(file -> {
+            fileIo.deleteFile(file.path().toString());
+            String bloomFilterBase = LocationProvider.getBloomFilterBaseLocationFromTablePath(
+                locations.getTableLocation(), file.path().toString(), spec, file.partition());
+            Set<Integer> columns = file.nullValueCounts().keySet();
+            for (int columnId : columns) {
+              String bloomFilterPath = String.format("%s-%d", bloomFilterBase, columnId);
+              if (BloomFilterReader.bloomFilterExists(bloomFilterPath)) {
+                fileIo.deleteFile(bloomFilterPath);
+              }
+            }
+          });
     }
 
-    protected void openCurrent() {
+    protected void openCurrent(StructLike key) {
       if (spec.fields().size() == 0) {
         // unpartitioned
         currentFile = fileFactory.newOutputFile();
+        bloomFilterBasePath = locations.bloomFilterBaseLocation(getFileName());
       } else {
         // partitioned
         currentFile = fileFactory.newOutputFile(currentKey);
+        bloomFilterBasePath = locations.bloomFilterBaseLocation(getFileName(), spec, key);
       }
-      currentAppender = appenderFactory.newAppender(currentFile.encryptingOutputFile(), format);
+      currentAppender = appenderFactory.newAppender(currentFile.encryptingOutputFile(), format, bloomFilterBasePath);
       currentRows = 0;
     }
 
@@ -480,6 +512,10 @@ class Writer implements DataSourceWriter {
     protected void setCurrentKey(PartitionKey currentKey) {
       this.currentKey = currentKey;
     }
+
+    protected String getFileName() {
+      return new File(currentFile.encryptingOutputFile().location()).getName();
+    }
   }
 
   private static class UnpartitionedWriter extends BaseWriter {
@@ -491,15 +527,16 @@ class Writer implements DataSourceWriter {
         AppenderFactory<InternalRow> appenderFactory,
         WriterFactory.OutputFileFactory fileFactory,
         FileIO fileIo,
-        long targetFileSize) {
-      super(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
+        long targetFileSize,
+        LocationProvider locations) {
+      super(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, locations);
 
-      openCurrent();
+      openCurrent(null);
     }
 
     @Override
     public void write(InternalRow row) throws IOException {
-      writeInternal(row);
+      writeInternal(row, null);
     }
   }
 
@@ -514,8 +551,9 @@ class Writer implements DataSourceWriter {
         WriterFactory.OutputFileFactory fileFactory,
         FileIO fileIo,
         long targetFileSize,
-        Schema writeSchema) {
-      super(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize);
+        Schema writeSchema,
+        LocationProvider locations) {
+      super(spec, format, appenderFactory, fileFactory, fileIo, targetFileSize, locations);
       this.key = new PartitionKey(spec, writeSchema);
     }
 
@@ -536,10 +574,10 @@ class Writer implements DataSourceWriter {
         }
 
         setCurrentKey(key.copy());
-        openCurrent();
+        openCurrent(key);
       }
 
-      writeInternal(row);
+      writeInternal(row, key);
     }
   }
 }

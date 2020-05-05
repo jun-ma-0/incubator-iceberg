@@ -24,8 +24,11 @@ import com.google.common.collect.Lists;
 import java.io.File;
 import java.io.IOException;
 import java.sql.Timestamp;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.hadoop.conf.Configuration;
@@ -76,6 +79,8 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import static org.apache.iceberg.Files.localOutput;
+import static org.apache.iceberg.types.Types.NestedField.optional;
+import static org.apache.iceberg.types.Types.NestedField.required;
 import static org.apache.spark.sql.catalyst.util.DateTimeUtils.fromJavaTimestamp;
 import static org.apache.spark.sql.functions.callUDF;
 import static org.apache.spark.sql.functions.column;
@@ -88,7 +93,16 @@ public class TestFilteredScan {
   private static final Schema SCHEMA = new Schema(
       Types.NestedField.required(1, "id", Types.LongType.get()),
       Types.NestedField.optional(2, "ts", Types.TimestampType.withZone()),
-      Types.NestedField.optional(3, "data", Types.StringType.get())
+      Types.NestedField.optional(3, "data", Types.StringType.get()),
+      Types.NestedField.optional(4, "idMap", Types.MapType.ofOptional(5, 6, Types.StringType.get(),
+          Types.ListType.ofOptional(7, Types.StructType.of(
+              required(8, "id", Types.LongType.get(), new Types.BloomFilterConfig(true, 0.01, 100)),
+              optional(9, "description", Types.StringType.get())))))
+  );
+
+  private static final Schema ARRAY_ELEMENT_SCHEMA = new Schema(
+      Types.NestedField.required(8, "id", Types.LongType.get(), new Types.BloomFilterConfig(true, 0.01, 100)),
+      optional(9, "description", Types.StringType.get())
   );
 
   private static final PartitionSpec BUCKET_BY_ID = PartitionSpec.builderFor(SCHEMA)
@@ -179,7 +193,7 @@ public class TestFilteredScan {
 
     // create records using the table's schema
     org.apache.avro.Schema avroSchema = AvroSchemaUtil.convert(tableSchema, "test");
-    this.records = testRecords(avroSchema);
+    this.records = testRecordsWithArrayNestedInMap(avroSchema);
 
     switch (fileFormat) {
       case AVRO:
@@ -456,6 +470,25 @@ public class TestFilteredScan {
   }
 
   @Test
+  public void testPartitionedByHourEqualById() {
+    File location = buildPartitionedTable("partitioned_by_hour", PARTITION_BY_HOUR, "ts_hour", "ts");
+
+    DataSourceOptions options = new DataSourceOptions(ImmutableMap.of(
+        "path", location.toString())
+    );
+
+    IcebergSource source = new IcebergSource();
+    DataSourceReader unfiltered = source.createReader(options);
+    Assert.assertEquals("Unfiltered table should created 9 read tasks",
+        9, unfiltered.planInputPartitions().size());
+
+    DataSourceReader reader = source.createReader(options);
+    pushFilters(reader, EqualTo.apply("idMap.value.id", 1L));
+
+    Assert.assertEquals(1, reader.planInputPartitions().size());
+  }
+
+  @Test
   public void testUnpartitionedStartsWith() {
     Dataset<Row> df = spark.read()
         .format("iceberg")
@@ -520,8 +553,8 @@ public class TestFilteredScan {
     Table byId = TABLES.create(SCHEMA, spec, location.toString());
 
     // Do not combine or split files because the tests expect a split per partition.
-    // A target split size of 2048 helps us achieve that.
-    byId.updateProperties().set("read.split.target-size", "2048").commit();
+    // A target split size of 4096 helps us achieve that.
+    byId.updateProperties().set("read.split.target-size", "4096").commit();
 
     // copy the unpartitioned table into the partitioned table to produce the partitioned data
     Dataset<Row> allRows = spark.read()
@@ -556,6 +589,31 @@ public class TestFilteredScan {
     );
   }
 
+  private List<Record> testRecordsWithArrayNestedInMap(org.apache.avro.Schema avroSchema) {
+    return Lists.newArrayList(
+        recordWithMapArray(avroSchema, 0L, timestamp("2017-12-22T09:20:44.294658+00:00"), "junction",
+            "anyKey", 9L, "anyData"),
+        recordWithMapArray(avroSchema, 1L, timestamp("2017-12-22T07:15:34.582910+00:00"), "alligator",
+            "anyKey", 8L, "anyData"),
+        recordWithMapArray(avroSchema, 2L, timestamp("2017-12-22T06:02:09.243857+00:00"), "forrest",
+            "anyKey", 7L, "anyData"),
+        recordWithMapArray(avroSchema, 3L, timestamp("2017-12-22T03:10:11.134509+00:00"), "clapping",
+            "anyKey", 6L, "anyData"),
+        recordWithMapArray(avroSchema, 4L, timestamp("2017-12-22T00:34:00.184671+00:00"), "brush",
+            "anyKey", 5L, "anyData"),
+        recordWithMapArray(avroSchema, 5L, timestamp("2017-12-21T22:20:08.935889+00:00"), "trap",
+            "anyKey", 4L, "anyData"),
+        recordWithMapArray(avroSchema, 6L, timestamp("2017-12-21T21:55:30.589712+00:00"), "element",
+            "anyKey", 3L, "anyData"),
+        recordWithMapArray(avroSchema, 7L, timestamp("2017-12-21T17:31:14.532797+00:00"), "limited",
+            "anyKey", 2L, "anyData"),
+        recordWithMapArray(avroSchema, 8L, timestamp("2017-12-21T15:21:51.237521+00:00"), "global",
+            "anyKey", 1L, "anyData"),
+        recordWithMapArray(avroSchema, 9L, timestamp("2017-12-21T15:02:15.230570+00:00"), "goldfish",
+            "anyKey", 0L, "anyData")
+    );
+  }
+
   private static List<Row> read(String table, String expr) {
     return read(table, expr, "*");
   }
@@ -576,5 +634,19 @@ public class TestFilteredScan {
       rec.put(i, values[i]);
     }
     return rec;
+  }
+
+  private static Record recordWithMapArray(org.apache.avro.Schema schemaWithArrayNestedInMap, Object... valuesObjs) {
+    Object[] values = valuesObjs;
+    Object key = values[values.length - 3];
+    Record arrayElement = record(AvroSchemaUtil.convert(ARRAY_ELEMENT_SCHEMA, "test"),
+        values[values.length - 2], values[values.length - 1]);
+    List<Object> valueList = Arrays.asList(arrayElement);
+    Map<Object, Object> map = new HashMap<>();
+    map.put(key, valueList);
+
+    Object[] valuesWithMap = Arrays.copyOfRange(values, 0, values.length - 2);
+    valuesWithMap[valuesWithMap.length - 1] = map;
+    return record(schemaWithArrayNestedInMap, valuesWithMap);
   }
 }

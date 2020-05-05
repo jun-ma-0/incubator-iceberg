@@ -17,18 +17,23 @@
  * under the License.
  */
 
-package org.apache.iceberg.parquet;
+package org.apache.iceberg.bf;
 
-import java.util.List;
-import org.apache.iceberg.bf.BloomFilterWriterStore;
-import org.apache.parquet.column.ColumnWriteStore;
+import java.nio.ByteBuffer;
+import net.openhft.hashing.LongHashFunction;
 
-public interface ParquetValueWriter<T> {
-  void write(int repetitionLevel, T value);
+/**
+ * The implementation of HashFunction interface. The XxHash uses XXH64 version xxHash
+ * with a seed of 0.
+ */
+public class XxHash implements HashFunction {
+  @Override
+  public long hashBytes(byte[] input) {
+    return LongHashFunction.xx(0).hashBytes(input);
+  }
 
-  List<TripleWriter<?>> columns();
-
-  void setColumnStore(ColumnWriteStore columnStore);
-
-  void setBloomFilterWriterStore(BloomFilterWriterStore bloomFilterStore);
+  @Override
+  public long hashByteBuffer(ByteBuffer input) {
+    return LongHashFunction.xx(0).hashBytes(input);
+  }
 }

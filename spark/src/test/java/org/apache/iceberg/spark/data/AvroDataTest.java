@@ -87,9 +87,8 @@ public abstract class AvroDataTest {
   public void testMap() throws IOException {
     Schema schema = new Schema(
         required(0, "id", LongType.get()),
-        optional(1, "data", MapType.ofOptional(2, 3,
-            Types.StringType.get(),
-            Types.StringType.get())));
+        optional(1, "data", MapType.ofOptional(2, 3, Types.StringType.get(),
+            ListType.ofOptional(4, SUPPORTED_PRIMITIVES))));
 
     writeAndValidate(schema);
   }

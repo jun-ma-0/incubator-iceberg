@@ -35,6 +35,7 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.expressions.InclusiveMetricsEvaluator;
 import org.apache.iceberg.expressions.Projections;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.LocationProvider;
 
 public class FilteredManifest implements Filterable<FilteredManifest> {
   private static final Set<String> STATS_COLUMNS = Sets.newHashSet(
@@ -96,9 +97,17 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
       InclusiveMetricsEvaluator metricsEvaluator = metricsEvaluator();
 
       return CloseableIterable.filter(reader.entries(projection(fileSchema, columns, caseSensitive)),
-          entry -> entry != null &&
-              evaluator.eval(entry.file().partition()) &&
-              metricsEvaluator.eval(entry.file()));
+          entry -> {
+            String bloomFilterBaseLoc = LocationProvider.getBloomFilterBaseLocationFromManifestPath(
+                reader.file().location(),
+                entry.file().path().toString(),
+                reader.spec(),
+                entry.file().partition()
+            );
+            return entry != null &&
+                evaluator.eval(entry.file().partition()) &&
+                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc);
+          });
 
     } else {
       return reader.entries(projection(fileSchema, columns, caseSensitive));
@@ -112,10 +121,18 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
       InclusiveMetricsEvaluator metricsEvaluator = metricsEvaluator();
 
       return CloseableIterable.filter(reader.entries(projection(fileSchema, columns, caseSensitive)),
-          entry -> entry != null &&
-              entry.status() != Status.DELETED &&
-              evaluator.eval(entry.file().partition()) &&
-              metricsEvaluator.eval(entry.file()));
+          entry -> {
+            String bloomFilterBaseLoc = LocationProvider.getBloomFilterBaseLocationFromManifestPath(
+                reader.file().location(),
+                entry.file().path().toString(),
+                reader.spec(),
+                entry.file().partition()
+            );
+            return entry != null &&
+                entry.status() != Status.DELETED &&
+                evaluator.eval(entry.file().partition()) &&
+                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc);
+          });
 
     } else {
       return CloseableIterable.filter(reader.entries(projection(fileSchema, columns, caseSensitive)),
@@ -139,9 +156,18 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
 
       return Iterators.transform(
           Iterators.filter(reader.iterator(partFilter, projection(fileSchema, projectColumns, caseSensitive)),
-              input -> input != null &&
-                  evaluator.eval(input.partition()) &&
-                  metricsEvaluator.eval(input)),
+              input -> {
+                String bloomFilterBaseLoc = LocationProvider.getBloomFilterBaseLocationFromManifestPath(
+                    reader.file().location(),
+                    input.path().toString(),
+                    reader.spec(),
+                    input.partition()
+                );
+                return input != null &&
+                    evaluator.eval(input.partition()) &&
+                    metricsEvaluator.eval(input, bloomFilterBaseLoc);
+              }
+          ),
           dropStats ? DataFile::copyWithoutStats : DataFile::copy);
 
     } else {

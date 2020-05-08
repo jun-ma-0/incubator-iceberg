@@ -82,7 +82,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
                 ParquetProperties properties,
                 MetricsConfig metricsConfig,
                 ParquetFileWriter.Mode writeMode,
-                String bloomFilterBasePath) {
+                Map<Integer, OutputFile> bloomFilterFileMap) {
     this.targetRowGroupSize = rowGroupSize;
     this.props = properties;
     this.metadata = ImmutableMap.copyOf(metadata);
@@ -90,8 +90,7 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
     this.parquetSchema = ParquetSchemaUtil.convert(schema, "table");
     this.model = (ParquetValueWriter<T>) createWriterFunc.apply(parquetSchema);
     this.metricsConfig = metricsConfig;
-    this.bloomFilterWriterStore = new BloomFilterWriterStore(
-        schema, bloomFilterBasePath);
+    this.bloomFilterWriterStore = new BloomFilterWriterStore(schema, bloomFilterFileMap);
 
     this.model.setBloomFilterWriterStore(bloomFilterWriterStore);
 

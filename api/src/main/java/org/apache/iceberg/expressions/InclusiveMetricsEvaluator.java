@@ -19,7 +19,6 @@
 
 package org.apache.iceberg.expressions;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map;
@@ -29,6 +28,7 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.bf.BloomFilter;
 import org.apache.iceberg.bf.BloomFilterReader;
 import org.apache.iceberg.expressions.ExpressionVisitors.BoundExpressionVisitor;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.types.Comparators;
 import org.apache.iceberg.types.Conversions;
 import org.apache.iceberg.types.Types.StructType;
@@ -81,6 +81,13 @@ public class InclusiveMetricsEvaluator {
     return visitor().eval(file);
   }
 
+  public boolean eval(DataFile file, String bloomFilterBaseLocation, FileIO io) {
+    return visitor().eval(file, bloomFilterBaseLocation, io);
+  }
+
+  /**
+   * For test
+   */
   public boolean eval(DataFile file, String bloomFilterBaseLocation) {
     return visitor().eval(file, bloomFilterBaseLocation);
   }
@@ -94,6 +101,8 @@ public class InclusiveMetricsEvaluator {
     private Map<Integer, ByteBuffer> lowerBounds = null;
     private Map<Integer, ByteBuffer> upperBounds = null;
     private Map<Integer, BloomFilter> bloomFilters = null;
+    private FileIO io = null;
+    private String bloomFilterBaseLocation = null;
 
     private boolean eval(DataFile file) {
       if (file.recordCount() <= 0) {
@@ -108,16 +117,19 @@ public class InclusiveMetricsEvaluator {
       return ExpressionVisitors.visitEvaluator(expr, this);
     }
 
-    private boolean eval(DataFile file, String bloomFilterBaseLocation) {
+    private boolean eval(DataFile file, String newBloomFilterBaseLocation, FileIO fileIO) {
+      this.bloomFilterBaseLocation = newBloomFilterBaseLocation;
+      this.io = fileIO;
       // todo - Currently BF file path is not stored anywhere. Both the reader and writer construct path using the same
       //  mechanism. Do we need to add bloom filter columns into data file struct, so that we can have a list of all
       //  the bloom files?
-      try {
-        this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, bloomFilterBaseLocation);
-      } catch (IOException e) {
-        throw new RuntimeException(String.format("Unable to load bloom filters for file %s", file.path()), e);
-      }
+      this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, newBloomFilterBaseLocation, io);
+      return eval(file);
+    }
 
+    private boolean eval(DataFile file, String newBloomFilterBaseLocation) {
+      this.bloomFilterBaseLocation = newBloomFilterBaseLocation;
+      this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, bloomFilterBaseLocation);
       return eval(file);
     }
 

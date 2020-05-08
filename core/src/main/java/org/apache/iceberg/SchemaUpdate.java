@@ -164,6 +164,11 @@ class SchemaUpdate implements UpdateSchema {
   }
 
   @Override
+  public UpdateSchema addBloomFilter(String name, double fpp, long ndv) {
+    return null;
+  }
+
+  @Override
   public UpdateSchema renameColumn(String name, String newName) {
     Types.NestedField field = schema.findField(name);
     Preconditions.checkArgument(field != null, "Cannot rename missing column: %s", name);
@@ -363,21 +368,24 @@ class SchemaUpdate implements UpdateSchema {
         String name = field.name();
         String doc = field.doc();
         boolean isOptional = field.isOptional();
+        Types.BloomFilterConfig bfConfig = field.bfConfig();
         Types.NestedField update = updates.get(field.fieldId());
         if (update != null) {
           name = update.name();
           doc = update.doc();
           isOptional = update.isOptional();
+          bfConfig = update.bfConfig();
         }
 
         if (name.equals(field.name()) &&
             isOptional == field.isOptional() &&
             field.type() == resultType &&
-            Objects.equals(doc, field.doc())) {
+            Objects.equals(doc, field.doc()) &&
+            Objects.equals(bfConfig, field.bfConfig())) {
           newFields.add(field);
         } else {
           hasChange = true;
-          newFields.add(Types.NestedField.of(field.fieldId(), isOptional, name, resultType, doc));
+          newFields.add(Types.NestedField.of(field.fieldId(), isOptional, name, resultType, doc, bfConfig));
         }
       }
 

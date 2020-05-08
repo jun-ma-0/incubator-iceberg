@@ -89,7 +89,8 @@ public class DataTableScan extends BaseTableScan {
         manifest -> {
           ManifestReader reader = ManifestReader.read(
               ops.io().newInputFile(manifest.path()),
-              ops.current().specsById());
+              ops.current().specsById(),
+              ops.io());
           PartitionSpec spec = ops.current().spec(manifest.partitionSpecId());
           String schemaString = SchemaParser.toJson(spec.schema());
           String specString = PartitionSpecParser.toJson(spec);

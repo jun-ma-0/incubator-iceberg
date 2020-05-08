@@ -20,15 +20,13 @@
 package org.apache.iceberg.bf;
 
 import com.google.common.base.Preconditions;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Arrays;
+import org.apache.iceberg.exceptions.RuntimeIOException;
 
 public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
   // Bytes in a tiny Bloom filter block.
@@ -68,8 +66,6 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
   private int maximumBytes = UPPER_BOUND_BYTES;
   private int minimumBytes = LOWER_BOUND_BYTES;
 
-  private final String path;
-
   // A cache used for hashing
   private ByteBuffer cacheBuffer = ByteBuffer.allocate(Long.BYTES);
 
@@ -80,11 +76,11 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
   private static final int[] SALT = {0x47b6137b, 0x44974d91, 0x8824ad5b, 0xa2b7289d,
       0x705495c7, 0x2df1424b, 0x9efc4947, 0x5c6bfb31};
 
-  public static BloomFilter read(String path) throws IOException {
-    byte[] data = Files.readAllBytes(Paths.get(path));
-    BloomFilter bloomFilter = new BlockSplitBloomFilter(data, path);
-    return bloomFilter;
-  }
+//  public static BloomFilter read(String path) throws IOException {
+//    byte[] data = Files.readAllBytes(Paths.get(path));
+//    BloomFilter bloomFilter = new BlockSplitBloomFilter(data);
+//    return bloomFilter;
+//  }
 
   /**
    * Constructor of block-based Bloom filter.
@@ -94,8 +90,8 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    *                 to lower/upper bound if num_bytes is out of range. It will also be rounded up to a power
    *                 of 2. It uses XXH64 as its default hash function.
    */
-  public BlockSplitBloomFilter(int numBytes, String path) {
-    this(numBytes, LOWER_BOUND_BYTES, UPPER_BOUND_BYTES, HashStrategy.XXH64, path);
+  public BlockSplitBloomFilter(int numBytes) {
+    this(numBytes, LOWER_BOUND_BYTES, UPPER_BOUND_BYTES, HashStrategy.XXH64);
   }
 
   /**
@@ -107,8 +103,8 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    *                     of 2. It uses XXH64 as its default hash function.
    * @param maximumBytes The maximum bytes of the Bloom filter.
    */
-  public BlockSplitBloomFilter(int numBytes, int maximumBytes, String path) {
-    this(numBytes, LOWER_BOUND_BYTES, maximumBytes, HashStrategy.XXH64, path);
+  public BlockSplitBloomFilter(int numBytes, int maximumBytes) {
+    this(numBytes, LOWER_BOUND_BYTES, maximumBytes, HashStrategy.XXH64);
   }
 
   /**
@@ -117,8 +113,8 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    * @param numBytes     The number of bytes for Bloom filter bitset
    * @param hashStrategy The hash strategy of Bloom filter.
    */
-  private BlockSplitBloomFilter(int numBytes, HashStrategy hashStrategy, String path) {
-    this(numBytes, LOWER_BOUND_BYTES, UPPER_BOUND_BYTES, hashStrategy, path);
+  private BlockSplitBloomFilter(int numBytes, HashStrategy hashStrategy) {
+    this(numBytes, LOWER_BOUND_BYTES, UPPER_BOUND_BYTES, hashStrategy);
   }
 
   /**
@@ -131,8 +127,7 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    * @param maximumBytes The maximum bytes of the Bloom filter.
    * @param hashStrategy The adopted hash strategy of the Bloom filter.
    */
-  public BlockSplitBloomFilter(int numBytes, int minimumBytes, int maximumBytes, HashStrategy hashStrategy,
-                               String path) {
+  public BlockSplitBloomFilter(int numBytes, int minimumBytes, int maximumBytes, HashStrategy hashStrategy) {
     if (minimumBytes > maximumBytes) {
       throw new IllegalArgumentException("the minimum bytes should be less or equal than maximum bytes");
     }
@@ -157,8 +152,6 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
       default:
         throw new RuntimeException("Unsupported hash strategy");
     }
-
-    this.path = path;
   }
 
 
@@ -169,8 +162,8 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    *
    * @param bitset The given bitset to construct Bloom filter.
    */
-  public BlockSplitBloomFilter(byte[] bitset, String path) {
-    this(bitset, HashStrategy.XXH64, path);
+  public BlockSplitBloomFilter(byte[] bitset) {
+    this(bitset, HashStrategy.XXH64);
   }
 
   /**
@@ -180,7 +173,7 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
    * @param bitset       The given bitset to construct Bloom filter.
    * @param hashStrategy The hash strategy Bloom filter apply.
    */
-  private BlockSplitBloomFilter(byte[] bitset, HashStrategy hashStrategy, String path) {
+  private BlockSplitBloomFilter(byte[] bitset, HashStrategy hashStrategy) {
     if (bitset == null) {
       throw new RuntimeException("Given bitset is null");
     }
@@ -196,8 +189,6 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
       default:
         throw new RuntimeException("Unsupported hash strategy");
     }
-
-    this.path = path;
   }
 
   /**
@@ -339,18 +330,17 @@ public class BlockSplitBloomFilter<T> implements BloomFilter<T> {
   }
 
   @Override
-  public void write() throws IOException {
-    File file = new File(path);
-    File parent = new File(file.getParent());
-    if (!parent.exists() && !parent.mkdirs()) {
-      throw new RuntimeException(String.format("Unable to create Bloom Filter directory at %s", file.getParent()));
-    }
-    if (!file.createNewFile()) {
-      throw new RuntimeException(String.format("Unable to create Bloom Filter file at %s", path));
-    }
-
-    try (FileOutputStream out = new FileOutputStream(file);) {
+  public void writeTo(OutputStream out) {
+    try {
       out.write(bitset);
+    } catch (IOException e) {
+      throw new RuntimeIOException(e);
+    } finally {
+      try {
+        out.close();
+      } catch (IOException e) {
+        throw new RuntimeIOException(e);
+      }
     }
   }
 

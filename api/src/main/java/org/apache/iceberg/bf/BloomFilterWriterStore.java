@@ -21,22 +21,21 @@ package org.apache.iceberg.bf;
 
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.types.Types;
 
 public class BloomFilterWriterStore {
-  private Map<Integer, BloomFilterWriter> bloomFilterWriters;
+  private final Map<Integer, BloomFilterWriter> bloomFilterWriters = new HashMap<>();
 
-  public BloomFilterWriterStore(Schema schema, String outputBasePath) {
-    List<Types.NestedField> fields = schema.fields();
-    bloomFilterWriters = new HashMap<>();
-    for (Types.NestedField field : fields) {
-      Types.BloomFilterConfig bfConfig = field.bfConfig();
-      if (bfConfig != null && bfConfig.isEnabled()) {
-        String path = String.format("%s-%s", outputBasePath, field.fieldId());
-        bloomFilterWriters.put(field.fieldId(), new BloomFilterWriter(bfConfig.fpp(), bfConfig.ndv(), path));
+  public BloomFilterWriterStore(Schema schema, Map<Integer, OutputFile> bloomFilterFileMap) {
+    if (bloomFilterFileMap != null) {
+      for (Integer fieldId : bloomFilterFileMap.keySet()) {
+        Types.BloomFilterConfig config = schema.findField(fieldId).bfConfig();
+        OutputFile outputFile = bloomFilterFileMap.get(fieldId);
+        BloomFilterWriter bfWriter = new BloomFilterWriter(config.fpp(), config.ndv(), outputFile);
+        bloomFilterWriters.put(fieldId, bfWriter);
       }
     }
   }

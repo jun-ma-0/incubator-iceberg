@@ -101,7 +101,7 @@ public class BaseTable implements Table, HasTableOperations {
 
   @Override
   public UpdateSchema updateSchema() {
-    return new SchemaUpdate(ops);
+    return new BloomFilterSchemaUpdate(ops);
   }
 
   @Override

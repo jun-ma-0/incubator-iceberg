@@ -198,7 +198,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   protected void add(ManifestFile manifest) {
     // the manifest must be rewritten with this update's snapshot ID
     try (ManifestReader reader = ManifestReader.read(
-        ops.io().newInputFile(manifest.path()), ops.current().specsById())) {
+        ops.io().newInputFile(manifest.path()), ops.current().specsById(), ops.io())) {
       appendManifests.add(ManifestWriter.copyAppendManifest(
           reader, manifestPath(manifestCount.getAndIncrement()), snapshotId(), appendedManifestsSummary));
     } catch (IOException e) {
@@ -445,7 +445,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     }
 
     try (ManifestReader reader = ManifestReader.read(
-        ops.io().newInputFile(manifest.path()), ops.current().specsById())) {
+        ops.io().newInputFile(manifest.path()), ops.current().specsById(), ops.io())) {
 
       // this is reused to compare file paths with the delete set
       CharSequenceWrapper pathWrapper = CharSequenceWrapper.wrap("");
@@ -645,7 +645,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     try {
       for (ManifestFile manifest : bin) {
         try (ManifestReader reader = ManifestReader.read(
-            ops.io().newInputFile(manifest.path()), ops.current().specsById())) {
+            ops.io().newInputFile(manifest.path()), ops.current().specsById(), ops.io())) {
           for (ManifestEntry entry : reader.entries()) {
             if (entry.status() == Status.DELETED) {
               // suppress deletes from previous snapshots. only files deleted by this snapshot

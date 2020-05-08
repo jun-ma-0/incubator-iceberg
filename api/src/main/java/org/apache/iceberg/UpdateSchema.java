@@ -325,4 +325,6 @@ public interface UpdateSchema extends PendingUpdate<Schema> {
    */
   UpdateSchema deleteColumn(String name);
 
+  UpdateSchema addBloomFilter(String name, double fpp, long ndv);
+
 }

@@ -20,10 +20,11 @@
 package org.apache.iceberg;
 
 import com.google.common.base.Preconditions;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 public class BloomFilterSchemaUpdate extends SchemaUpdate {
-  BloomFilterSchemaUpdate(TableOperations ops) {
+  public BloomFilterSchemaUpdate(TableOperations ops) {
     super(ops);
   }
 
@@ -34,7 +35,7 @@ public class BloomFilterSchemaUpdate extends SchemaUpdate {
     super(schema, lastColumnId);
   }
 
-  public UpdateSchema addBloomFilter(String name, double fpp, long ndv) {
+  public SchemaUpdate addBloomFilter(String name, double fpp, long ndv) {
     Types.NestedField field = schema().findField(name);
     Preconditions.checkArgument(field != null, "Cannot rename missing column: %s", name);
     Preconditions.checkArgument(fpp > 0 && fpp < 1.0, "FPP must between (0, 1)");
@@ -50,6 +51,11 @@ public class BloomFilterSchemaUpdate extends SchemaUpdate {
       updates().put(fieldId,
           Types.NestedField.of(fieldId, field.isOptional(), field.name(), field.type(), field.doc(), bfConfig));
     }
+    return this;
+  }
+
+  public BloomFilterSchemaUpdate addColumn(String name, Type type, String doc) {
+    super.addColumn(name, type, doc);
     return this;
   }
 }

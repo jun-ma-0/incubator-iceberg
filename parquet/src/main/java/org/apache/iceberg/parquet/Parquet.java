@@ -86,7 +86,7 @@ public class Parquet {
     private Function<MessageType, ParquetValueWriter<?>> createWriterFunc = null;
     private MetricsConfig metricsConfig = MetricsConfig.getDefault();
     private ParquetFileWriter.Mode writeMode = ParquetFileWriter.Mode.CREATE;
-    private String bloomFilterBasePath = null;
+    private Map<Integer, OutputFile> bloomFilterFileMap = null;
 
     private WriteBuilder(OutputFile file) {
       this.file = file;
@@ -148,8 +148,8 @@ public class Parquet {
       return this;
     }
 
-    public WriteBuilder bloomFilterBasePath(String newBloomFilterBasePath) {
-      this.bloomFilterBasePath = newBloomFilterBasePath;
+    public WriteBuilder bloomFilterFileMap(Map<Integer, OutputFile> newBloomFilterFileMap) {
+      this.bloomFilterFileMap = newBloomFilterFileMap;
       return this;
     }
 
@@ -216,7 +216,7 @@ public class Parquet {
 
         return new org.apache.iceberg.parquet.ParquetWriter<>(
             conf, file, schema, rowGroupSize, metadata, createWriterFunc, codec(),
-            parquetProperties, metricsConfig, writeMode, bloomFilterBasePath);
+            parquetProperties, metricsConfig, writeMode, bloomFilterFileMap);
       } else {
         return new ParquetWriteAdapter<>(new ParquetWriteBuilder<D>(ParquetIO.file(file))
             .withWriterVersion(writerVersion)

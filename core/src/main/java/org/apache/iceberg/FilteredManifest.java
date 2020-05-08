@@ -35,6 +35,7 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.expressions.InclusiveMetricsEvaluator;
 import org.apache.iceberg.expressions.Projections;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
 
 public class FilteredManifest implements Filterable<FilteredManifest> {
@@ -47,13 +48,14 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
   private final Schema fileSchema;
   private final Collection<String> columns;
   private final boolean caseSensitive;
+  private final FileIO io;
 
   // lazy state
   private Evaluator lazyEvaluator = null;
   private InclusiveMetricsEvaluator lazyMetricsEvaluator = null;
 
   FilteredManifest(ManifestReader reader, Expression partFilter, Expression rowFilter,
-                   Schema fileSchema, Collection<String> columns, boolean caseSensitive) {
+                   Schema fileSchema, Collection<String> columns, boolean caseSensitive, FileIO io) {
     Preconditions.checkNotNull(reader, "ManifestReader cannot be null");
     this.reader = reader;
     this.partFilter = partFilter;
@@ -61,33 +63,34 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
     this.fileSchema = fileSchema;
     this.columns = columns;
     this.caseSensitive = caseSensitive;
+    this.io = io;
   }
 
   @Override
   public FilteredManifest select(Collection<String> selectedColumns) {
-    return new FilteredManifest(reader, partFilter, rowFilter, fileSchema, selectedColumns, caseSensitive);
+    return new FilteredManifest(reader, partFilter, rowFilter, fileSchema, selectedColumns, caseSensitive, io);
   }
 
   @Override
   public FilteredManifest project(Schema fileProjection) {
-    return new FilteredManifest(reader, partFilter, rowFilter, fileProjection, columns, caseSensitive);
+    return new FilteredManifest(reader, partFilter, rowFilter, fileProjection, columns, caseSensitive, io);
   }
 
   @Override
   public FilteredManifest filterPartitions(Expression expr) {
     return new FilteredManifest(
-        reader, Expressions.and(partFilter, expr), rowFilter, fileSchema, columns, caseSensitive);
+        reader, Expressions.and(partFilter, expr), rowFilter, fileSchema, columns, caseSensitive, io);
   }
 
   @Override
   public FilteredManifest filterRows(Expression expr) {
     return new FilteredManifest(
-        reader, partFilter, Expressions.and(rowFilter, expr), fileSchema, columns, caseSensitive);
+        reader, partFilter, Expressions.and(rowFilter, expr), fileSchema, columns, caseSensitive, io);
   }
 
   @Override
   public FilteredManifest caseSensitive(boolean isCaseSensitive) {
-    return new FilteredManifest(reader, partFilter, rowFilter, fileSchema, columns, isCaseSensitive);
+    return new FilteredManifest(reader, partFilter, rowFilter, fileSchema, columns, isCaseSensitive, io);
   }
 
   CloseableIterable<ManifestEntry> allEntries() {
@@ -106,7 +109,7 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
             );
             return entry != null &&
                 evaluator.eval(entry.file().partition()) &&
-                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc);
+                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc, io);
           });
 
     } else {
@@ -131,7 +134,7 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
             return entry != null &&
                 entry.status() != Status.DELETED &&
                 evaluator.eval(entry.file().partition()) &&
-                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc);
+                metricsEvaluator.eval(entry.file(), bloomFilterBaseLoc, io);
           });
 
     } else {
@@ -165,7 +168,7 @@ public class FilteredManifest implements Filterable<FilteredManifest> {
                 );
                 return input != null &&
                     evaluator.eval(input.partition()) &&
-                    metricsEvaluator.eval(input, bloomFilterBaseLoc);
+                    metricsEvaluator.eval(input, bloomFilterBaseLoc, io);
               }
           ),
           dropStats ? DataFile::copyWithoutStats : DataFile::copy);

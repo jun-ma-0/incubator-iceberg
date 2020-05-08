@@ -47,17 +47,18 @@ import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.avro.Avro;
-import org.apache.iceberg.bf.BloomFilterReader;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.LocationProvider;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.spark.data.SparkAvroWriter;
 import org.apache.iceberg.spark.data.SparkParquetWriters;
+import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.Tasks;
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -229,7 +230,8 @@ class Writer implements DataSourceWriter {
           Set<Integer> columns = file.nullValueCounts().keySet();
           for (int columnId : columns) {
             String bloomFilterPath = String.format("%s-%d", bloomFilterBasePath, columnId);
-            if (BloomFilterReader.bloomFilterExists(bloomFilterPath)) {
+            InputFile inputFile = fileIo.newInputFile(bloomFilterPath);
+            if (inputFile.exists()) {
               fileIo.deleteFile(bloomFilterPath);
             }
           }
@@ -327,13 +329,24 @@ class Writer implements DataSourceWriter {
         try {
           switch (fileFormat) {
             case PARQUET:
+              List<Types.NestedField> fields = dsSchema.fields();
+              Map<Integer, OutputFile> bfOutputFileMap = new HashMap<>();
+              for (Types.NestedField field : fields) {
+                Types.BloomFilterConfig bfConfig = field.bfConfig();
+                if (bfConfig != null && bfConfig.isEnabled()) {
+                  String path = String.format("%s-%s", bloomFilterBasePath, field.fieldId());
+                  OutputFile bfFile = fileIo.newOutputFile(path);
+                  bfOutputFileMap.put(field.fieldId(), bfFile);
+                }
+              }
+
               return Parquet.write(file)
                   .createWriterFunc(msgType -> SparkParquetWriters.buildWriter(dsSchema, msgType))
                   .setAll(properties)
                   .metricsConfig(metricsConfig)
                   .schema(dsSchema)
                   .overwrite()
-                  .bloomFilterBasePath(bloomFilterBasePath)
+                  .bloomFilterFileMap(bfOutputFileMap)
                   .build();
 
             case AVRO:
@@ -455,12 +468,11 @@ class Writer implements DataSourceWriter {
           .noRetry()
           .run(file -> {
             fileIo.deleteFile(file.path().toString());
-            String bloomFilterBase = LocationProvider.getBloomFilterBaseLocationFromTablePath(
-                locations.getTableLocation(), file.path().toString(), spec, file.partition());
             Set<Integer> columns = file.nullValueCounts().keySet();
             for (int columnId : columns) {
-              String bloomFilterPath = String.format("%s-%d", bloomFilterBase, columnId);
-              if (BloomFilterReader.bloomFilterExists(bloomFilterPath)) {
+              String bloomFilterPath = String.format("%s-%d", bloomFilterBasePath, columnId);
+              InputFile inputFile = fileIo.newInputFile(bloomFilterPath);
+              if (inputFile.exists()) {
                 fileIo.deleteFile(bloomFilterPath);
               }
             }

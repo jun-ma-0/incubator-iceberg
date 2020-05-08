@@ -19,18 +19,20 @@
 
 package org.apache.iceberg.bf;
 
-import java.io.IOException;
+import org.apache.iceberg.io.OutputFile;
 
 /**
  * Defines the interface to write values into a Bloom Filter
  */
 public class BloomFilterWriter {
   // Insert value into Bloom Filter
-  private BloomFilter bloomFilter;
+  private final BloomFilter bloomFilter;
+  private final OutputFile outputFile;
 
-  public BloomFilterWriter(double fpp, long ndv, String path) {
+  public BloomFilterWriter(double fpp, long ndv, OutputFile outputFile) {
     int bits = BlockSplitBloomFilter.optimalNumOfBits(ndv, fpp);
-    bloomFilter = new BlockSplitBloomFilter(bits, path);
+    this.bloomFilter = new BlockSplitBloomFilter(bits / 8);
+    this.outputFile = outputFile;
   }
 
   public void write(int value) {
@@ -59,7 +61,7 @@ public class BloomFilterWriter {
   }
 
   // Call close to write Bloom Filter into disk. It should be called when all values in a column are inserted.
-  void close() throws IOException {
-    bloomFilter.write();
+  void close() {
+    bloomFilter.writeTo(outputFile.create());
   }
 }

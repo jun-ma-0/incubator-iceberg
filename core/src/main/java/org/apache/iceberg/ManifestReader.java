@@ -34,6 +34,7 @@ import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableGroup;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
@@ -44,7 +45,7 @@ import static org.apache.iceberg.expressions.Expressions.alwaysTrue;
 /**
  * Reader for manifest files.
  * <p>
- * Readers are created using the builder from {@link #read(InputFile, Map)}.
+ * Readers are created using the builder from {@link #read(InputFile, Map, FileIO)}.
  */
 public class ManifestReader extends CloseableGroup implements Filterable<FilteredManifest> {
   private static final Logger LOG = LoggerFactory.getLogger(ManifestReader.class);
@@ -57,41 +58,39 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
       .add("value_counts", "null_value_counts", "lower_bounds", "upper_bounds")
       .build();
 
+  public static ManifestReader read(InputFile file) {
+    return new ManifestReader(file, null, null);
+  }
+
   /**
    * Returns a new {@link ManifestReader} for an {@link InputFile}.
    * <p>
-   * <em>Note:</em> Most callers should use {@link #read(InputFile, Map)} to ensure that the
+   * <em>Note:</em> Most callers should use {@link #read(InputFile, Map, FileIO)} to ensure that the
    * schema used by filters is the latest table schema. This should be used only when reading a
    * manifest without filters.
    *
    * @param file an InputFile
    * @return a manifest reader
    */
-  public static ManifestReader read(InputFile file) {
-    return new ManifestReader(file, null);
+  public static ManifestReader read(InputFile file, FileIO io) {
+    return new ManifestReader(file, null, io);
   }
 
-  /**
-   * Returns a new {@link ManifestReader} for an {@link InputFile}.
-   *
-   * @param file an InputFile
-   * @param specsById a Map from spec ID to partition spec
-   * @return a manifest reader
-   */
-  public static ManifestReader read(InputFile file, Map<Integer, PartitionSpec> specsById) {
-    return new ManifestReader(file, specsById);
+  public static ManifestReader read(InputFile file, Map<Integer, PartitionSpec> specsById, FileIO io) {
+    return new ManifestReader(file, specsById, io);
   }
 
   private final InputFile file;
   private final Map<String, String> metadata;
   private final PartitionSpec spec;
   private final Schema fileSchema;
+  private final FileIO io;
 
   // lazily initialized
   private List<ManifestEntry> cachedAdds = null;
   private List<ManifestEntry> cachedDeletes = null;
 
-  private ManifestReader(InputFile file, Map<Integer, PartitionSpec> specsById) {
+  private ManifestReader(InputFile file, Map<Integer, PartitionSpec> specsById, FileIO io) {
     this.file = file;
 
     try {
@@ -118,6 +117,7 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
     }
 
     this.fileSchema = new Schema(DataFile.getType(spec.partitionType()).fields());
+    this.io = io;
   }
 
   public InputFile file() {
@@ -134,27 +134,28 @@ public class ManifestReader extends CloseableGroup implements Filterable<Filtere
 
   @Override
   public FilteredManifest select(Collection<String> columns) {
-    return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileSchema, columns, true);
+    return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileSchema, columns, true, io);
   }
 
   @Override
   public FilteredManifest project(Schema fileProjection) {
-    return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileProjection, ALL_COLUMNS, true);
+    return new FilteredManifest(
+        this, alwaysTrue(), alwaysTrue(), fileProjection, ALL_COLUMNS, true, io);
   }
 
   @Override
   public FilteredManifest filterPartitions(Expression expr) {
-    return new FilteredManifest(this, expr, alwaysTrue(), fileSchema, ALL_COLUMNS, true);
+    return new FilteredManifest(this, expr, alwaysTrue(), fileSchema, ALL_COLUMNS, true, io);
   }
 
   @Override
   public FilteredManifest filterRows(Expression expr) {
-    return new FilteredManifest(this, alwaysTrue(), expr, fileSchema, ALL_COLUMNS, true);
+    return new FilteredManifest(this, alwaysTrue(), expr, fileSchema, ALL_COLUMNS, true, io);
   }
 
   @Override
   public FilteredManifest caseSensitive(boolean caseSensitive) {
-    return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileSchema, ALL_COLUMNS, caseSensitive);
+    return new FilteredManifest(this, alwaysTrue(), alwaysTrue(), fileSchema, ALL_COLUMNS, caseSensitive, io);
   }
 
   public List<ManifestEntry> addedFiles() {

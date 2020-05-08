@@ -19,27 +19,26 @@
 
 package org.apache.iceberg.bf;
 
+import com.google.common.io.ByteStreams;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import org.apache.iceberg.DataFile;
+import org.apache.iceberg.exceptions.RuntimeIOException;
+import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.io.InputFile;
+import org.apache.iceberg.io.SeekableInputStream;
 
 public class BloomFilterReader {
   private BloomFilterReader() {
   }
 
-  public static boolean bloomFilterExists(String path) {
-    File file = new File(path);
-    if (!file.exists()) {
-      return false;
-    }
-    return true;
-  }
-
-  public static Map<Integer, BloomFilter> loadBloomFiltersForFile(DataFile file, String bloomFilterBaseLocation)
-      throws IOException {
+  public static Map<Integer, BloomFilter> loadBloomFiltersForFile(
+      DataFile file, String bloomFilterBaseLocation, FileIO io) {
     Map<Integer, BloomFilter> bloomFilterMap = new HashMap<>();
     if (file.nullValueCounts() == null) {
       return bloomFilterMap;
@@ -48,8 +47,42 @@ public class BloomFilterReader {
     Set<Integer> columns = file.nullValueCounts().keySet();
     for (int columnId : columns) {
       String bloomFilterPath = String.format("%s-%d", bloomFilterBaseLocation, columnId);
-      if (bloomFilterExists(bloomFilterPath)) {
-        BloomFilter bf = BlockSplitBloomFilter.read(bloomFilterPath);
+      InputFile inputFile = io.newInputFile(bloomFilterPath);
+      byte[] bfArray = null;
+      if (inputFile.exists()) {
+        try (SeekableInputStream is = inputFile.newStream()) {
+          bfArray = ByteStreams.toByteArray(is);
+        } catch (IOException e) {
+          throw new RuntimeIOException(e);
+        }
+        BloomFilter bf = new BlockSplitBloomFilter(bfArray);
+        bloomFilterMap.put(columnId, bf);
+      }
+    }
+    return bloomFilterMap;
+  }
+
+  /**
+   * For test
+   */
+  public static Map<Integer, BloomFilter> loadBloomFiltersForFile(DataFile file, String bloomFilterBaseLocation) {
+    Map<Integer, BloomFilter> bloomFilterMap = new HashMap<>();
+    if (file.nullValueCounts() == null) {
+      return bloomFilterMap;
+    }
+
+    Set<Integer> columns = file.nullValueCounts().keySet();
+    for (int columnId : columns) {
+      String bloomFilterPath = String.format("%s-%d", bloomFilterBaseLocation, columnId);
+      File bfFile = new File(bloomFilterPath);
+      if (bfFile.exists()) {
+        byte[] bfArray = null;
+        try {
+          bfArray = Files.readAllBytes(Paths.get(bloomFilterPath));
+        } catch (IOException e) {
+          throw new RuntimeIOException(e);
+        }
+        BloomFilter bf = new BlockSplitBloomFilter(bfArray);
         bloomFilterMap.put(columnId, bf);
       }
     }

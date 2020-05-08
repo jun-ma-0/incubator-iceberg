@@ -22,13 +22,19 @@ package org.apache.iceberg.expressions;
 import com.google.common.collect.ImmutableMap;
 import java.io.File;
 import java.io.IOException;
+import java.util.Map;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.TestHelpers.Row;
 import org.apache.iceberg.TestHelpers.TestDataFile;
+import org.apache.iceberg.bf.BloomFilter;
+import org.apache.iceberg.bf.BloomFilterReader;
+import org.apache.iceberg.bf.BloomFilterWriter;
+import org.apache.iceberg.bf.BloomFilterWriterStore;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.exceptions.ValidationException;
+import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.IntegerType;
 import org.apache.iceberg.types.Types.StringType;
@@ -37,6 +43,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import static org.apache.iceberg.Files.localOutput;
 import static org.apache.iceberg.expressions.Expressions.and;
 import static org.apache.iceberg.expressions.Expressions.equal;
 import static org.apache.iceberg.expressions.Expressions.greaterThan;
@@ -61,6 +68,16 @@ public class TestInclusiveMetricsEvaluator {
       optional(4, "all_nulls", Types.StringType.get()),
       optional(5, "some_nulls", Types.StringType.get()),
       optional(6, "no_nulls", Types.StringType.get())
+  );
+
+  private static final Schema SCHEMA_WITH_MAP = new Schema(
+      Types.NestedField.required(1, "id", Types.LongType.get()),
+      Types.NestedField.optional(2, "ts", Types.TimestampType.withZone()),
+      Types.NestedField.optional(3, "data", Types.StringType.get()),
+      Types.NestedField.optional(4, "idMap", Types.MapType.ofOptional(5, 6, Types.StringType.get(),
+          Types.ListType.ofOptional(7, Types.StructType.of(
+              required(8, "id", Types.LongType.get(), new Types.BloomFilterConfig(true, 0.01, 10)),
+              optional(9, "description", Types.StringType.get())))))
   );
 
   private static String tableLocation;
@@ -126,10 +143,51 @@ public class TestInclusiveMetricsEvaluator {
       // upper bounds
       ImmutableMap.of(3, toByteBuffer(StringType.get(), "イロハニホヘト")));
 
+  private static final DataFile FILE_5 = new TestDataFile(String.format("%s/file_5.avro", dataLocation), Row.of(), 50,
+      // any value counts, including nulls
+      ImmutableMap.of(),
+      // null value counts
+      ImmutableMap.of(8, 2L),
+      // lower bounds
+      ImmutableMap.of(),
+      // upper bounds
+      ImmutableMap.of());
+
   @Test
-  public void testBF() {
-    //todo
+  public void testBloomFilter() throws IOException {
+    String bfBaseLocation = String.format("%s/metadata/bloomFilter/file_5.avro", tableLocation);
+    int bfFieldId = 8;
+    Map<Integer, OutputFile> bloomFilterMap = ImmutableMap.of(
+        bfFieldId, localOutput(String.format("%s-8", bfBaseLocation))
+    );
+    BloomFilterWriterStore writerStore = new BloomFilterWriterStore(SCHEMA_WITH_MAP, bloomFilterMap);
+
+    BloomFilterWriter writer = writerStore.getBloomFilterWriter(bfFieldId);
+    for (int j = 0; j < 10; ++j) {
+      writer.write(Long.valueOf(j));
+    }
+    writerStore.close();
+
+    String bfPath = String.format("%s-%d", bfBaseLocation, bfFieldId);
+    Assert.assertTrue(String.format("Bloom Filter for field %d should exist", bfFieldId),
+        new File(bfPath).exists());
+
+    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFiltersForFile(FILE_5, bfBaseLocation);
+    Assert.assertTrue("Should read 1 Bloom Filters for the given data file", bfMap.size() == 1);
+
+    for (int i = 0; i < 10; ++i) {
+      boolean shouldRead = new InclusiveMetricsEvaluator(SCHEMA_WITH_MAP, equal("idMap.value.id", 1))
+          .eval(FILE_5, bfBaseLocation);
+      Assert.assertTrue("Should read: equal on bloom filter column", shouldRead);
+    }
+
+    for (int i = 10; i < 20; ++i) {
+      boolean shouldRead = new InclusiveMetricsEvaluator(SCHEMA_WITH_MAP, equal("idMap.value.id", 20))
+          .eval(FILE_5, bfBaseLocation);
+      Assert.assertFalse("Should skip: equal on bloom filter column", shouldRead);
+    }
   }
+
   @Test
   public void testAllNulls() {
     boolean shouldRead = new InclusiveMetricsEvaluator(SCHEMA, notNull("all_nulls")).eval(FILE);

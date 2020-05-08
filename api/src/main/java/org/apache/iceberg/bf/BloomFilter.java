@@ -19,7 +19,7 @@
 
 package org.apache.iceberg.bf;
 
-import java.io.IOException;
+import java.io.OutputStream;
 
 /**
  * Defines the Bloom Filter data structure. It usually contains a bit array and one or more hash function(s).
@@ -44,7 +44,7 @@ public interface BloomFilter<T> {
     }
   }
 
-  void write() throws IOException;
+  void writeTo(OutputStream out);
 
   long hash(T value);
 

@@ -486,6 +486,13 @@ public class TestFilteredScan {
     pushFilters(reader, EqualTo.apply("idMap.value.id", 1L));
 
     Assert.assertEquals(1, reader.planInputPartitions().size());
+    Dataset rows = spark
+        .read()
+        .format("iceberg")
+        .option("iceberg.bloomFilter.input",
+            "[{\"field\": \"idMap.value.id\", \"type\": \"long\", \"values\": [\"1\"]}]")
+        .load(location.toString());
+    Assert.assertEquals(2, rows.count());
   }
 
   @Test

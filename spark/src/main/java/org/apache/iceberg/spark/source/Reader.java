@@ -72,7 +72,9 @@ import org.apache.spark.sql.catalyst.expressions.AttributeReference;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.catalyst.expressions.JoinedRow;
 import org.apache.spark.sql.catalyst.expressions.UnsafeProjection;
+import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.sources.In;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;
 import org.apache.spark.sql.sources.v2.reader.DataSourceReader;
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
@@ -89,6 +91,9 @@ import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
+import org.codehaus.jettison.json.JSONArray;
+import org.codehaus.jettison.json.JSONException;
+import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scala.collection.JavaConverters;
@@ -119,6 +124,8 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
   private boolean parquetFilter = true;
 
+  private BloomFilterInput[] bloomFilterInputArray = null;
+
   Reader(Table table, boolean caseSensitive, DataSourceOptions options) {
     this.table = table;
     this.snapshotId = options.get("snapshot-id").map(Long::parseLong).orElse(null);
@@ -137,6 +144,26 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
     this.fileIo = table.io();
     this.encryptionManager = table.encryption();
     this.caseSensitive = caseSensitive;
+
+    String bfString = options.get("iceberg.bloomFilter.input").orElse(null);
+    if (bfString != null) {
+      try {
+        JSONArray jsonArray = new JSONArray(bfString);
+        bloomFilterInputArray = new BloomFilterInput[jsonArray.length()];
+        for (int i = 0; i < jsonArray.length(); ++i) {
+          JSONObject bfInputObject = jsonArray.getJSONObject(i);
+          JSONArray bfValues = bfInputObject.getJSONArray("values");
+          List<String> bfValueList = new ArrayList<>(bfValues.length());
+          for (int j = 0; j < bfValues.length(); ++j) {
+            bfValueList.add(bfValues.getString(j));
+          }
+          bloomFilterInputArray[i] =
+              new BloomFilterInput(bfInputObject.getString("field"), bfInputObject.getString("type"), bfValueList);
+        }
+      } catch (JSONException e) {
+        throw new IllegalArgumentException("Unable to parse spark option iceberg.bloomFilter.input", e);
+      }
+    }
   }
 
   Reader(Table table, boolean caseSensitive, DataSourceOptions options, boolean parquetFilter) {
@@ -194,14 +221,29 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
   public Filter[] pushFilters(Filter[] filters) {
     this.tasks = null; // invalidate cached tasks, if present
 
-    List<Expression> expressions = Lists.newArrayListWithExpectedSize(filters.length);
+    List<Expression> expressions = null;
     List<Filter> pushed = Lists.newArrayListWithExpectedSize(filters.length);
 
-    for (Filter filter : filters) {
+    List<Filter> filterList = Lists.newArrayList(filters);
+    Filter bloomFilter = null;
+    if (bloomFilterInputArray != null && bloomFilterInputArray.length != 0) {
+      bloomFilter = In.apply(bloomFilterInputArray[0].getField(), bloomFilterInputArray[0].getValues());
+      for (int i = 1; i < bloomFilterInputArray.length; ++i) {
+        BloomFilterInput bfInput = bloomFilterInputArray[i];
+        bloomFilter = And.apply(In.apply(bfInput.getField(), bfInput.getValues()), bloomFilter);
+      }
+      filterList.add(bloomFilter);
+      expressions = Lists.newArrayListWithExpectedSize(filters.length + 1);
+    } else {
+      expressions = Lists.newArrayListWithExpectedSize(filters.length);
+    }
+    for (Filter filter : filterList) {
       Expression expr = SparkFilters.convert(filter);
       if (expr != null) {
         expressions.add(expr);
-        pushed.add(filter);
+        if (filter != bloomFilter) {
+          pushed.add(filter);
+        }
       }
     }
 
@@ -350,6 +392,48 @@ class Reader implements DataSourceReader, SupportsPushDownFilters, SupportsPushD
         this.expectedSchema = SchemaParser.fromJson(expectedSchemaString);
       }
       return expectedSchema;
+    }
+  }
+
+  private static class BloomFilterInput {
+    private final String field;
+    private final String fieldType;
+    private final List<String> values;
+
+    BloomFilterInput(String newField, String newFieldType, List<String> newValues) {
+      this.field = newField;
+      this.fieldType = newFieldType;
+      this.values = newValues;
+    }
+
+    String getField() {
+      return field;
+    }
+
+    Object[] getValues() {
+      return values.stream().map(value -> {
+        Object convertedValue = null;
+        switch (fieldType.toLowerCase()) {
+          case "long":
+            convertedValue = Long.valueOf(value);
+            break;
+          case "int":
+            convertedValue = Integer.valueOf(value);
+            break;
+          case "string":
+            convertedValue = value;
+            break;
+          case "double":
+            convertedValue = Double.valueOf(value);
+            break;
+          case "float":
+            convertedValue = Float.valueOf(value);
+            break;
+          default:
+            throw new IllegalArgumentException("Illegal value for bloom filter input type");
+        }
+        return convertedValue;
+      }).toArray();
     }
   }
 

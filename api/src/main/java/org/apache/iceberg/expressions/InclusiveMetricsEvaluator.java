@@ -310,7 +310,17 @@ public class InclusiveMetricsEvaluator {
 
     @Override
     public <T> Boolean in(BoundReference<T> ref, Set<T> literalSet) {
-      return ROWS_MIGHT_MATCH;
+      Integer id = ref.fieldId();
+      for (T lit : literalSet) {
+        if (bloomFilters != null && bloomFilters.containsKey(id)) {
+          BloomFilter bf = bloomFilters.get(id);
+          long hash = bf.hash(lit);
+          if (bf.findHash(hash)) {
+            return ROWS_MIGHT_MATCH;
+          }
+        }
+      }
+      return ROWS_CANNOT_MATCH;
     }
 
     @Override

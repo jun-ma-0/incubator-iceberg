@@ -132,4 +132,11 @@ public class TestExtendedReaderNestedField extends WithSpark {
     double avg = load.agg(functions.avg(load.col("_id"))).collectAsList().get(0).getDouble(0);
     Assert.assertEquals("Expect avg 20.0 for all but tombstoned rows", 20.0, avg, 0.0);
   }
+
+//  @Test
+//  public void testFilterForMap() {
+//    Timestamp ts = Timestamp.valueOf("2019-10-10 10:10:10.10");
+//    ImmutableMap.of("key", ImmutableIntArray.of(1));
+//    RowFactory.create(10, ts, "XYZ", RowFactory.create("D", Collections.emptyMap()));
+//  }
 }

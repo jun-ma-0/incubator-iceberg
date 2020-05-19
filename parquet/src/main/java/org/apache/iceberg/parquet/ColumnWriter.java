@@ -142,7 +142,7 @@ public abstract class ColumnWriter<T> implements TripleWriter<T> {
   public void writeBinary(int rl, Binary value) {
     columnWriter.write(value, rl, maxDefinitionLevel);
     if (isBloomFilterEnabled) {
-      bloomFilterWriter.write(value.toString());
+      bloomFilterWriter.write(new String(value.getBytes()));
     }
   }
 

@@ -56,7 +56,13 @@ public interface LocationProvider extends Serializable {
 
   static String getBloomFilterBaseLocationFromManifestPath(
       String manifestPath, String filePath, PartitionSpec spec, StructLike partitionData) {
-    String metadataPath = new File(manifestPath).getParent();
+    String manifestFileName = new File(manifestPath).getName();
+    // Extract metadata path from manifest path.
+    // We're doing so because this method is used in class FilteredManifest only,
+    // where table/metadata path is not available.
+    String metadataPath = manifestPath
+        .substring(0, manifestPath.length() - manifestFileName.length())
+        .replaceAll("/+$", "");
     String fileName = new File(filePath).getName();
     return String.format("%s/bloomFilters/%s/%s", metadataPath, spec.partitionToPath(partitionData), fileName);
   }

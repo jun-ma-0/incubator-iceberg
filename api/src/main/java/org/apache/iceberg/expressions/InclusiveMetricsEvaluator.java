@@ -86,7 +86,7 @@ public class InclusiveMetricsEvaluator {
   }
 
   /**
-   * For test
+   * For test only
    */
   public boolean eval(DataFile file, String bloomFilterBaseLocation) {
     return visitor().eval(file, bloomFilterBaseLocation);
@@ -100,7 +100,6 @@ public class InclusiveMetricsEvaluator {
     private Map<Integer, Long> nullCounts = null;
     private Map<Integer, ByteBuffer> lowerBounds = null;
     private Map<Integer, ByteBuffer> upperBounds = null;
-    private Map<Integer, BloomFilter> bloomFilters = null;
     private FileIO io = null;
     private String bloomFilterBaseLocation = null;
 
@@ -120,16 +119,12 @@ public class InclusiveMetricsEvaluator {
     private boolean eval(DataFile file, String newBloomFilterBaseLocation, FileIO fileIO) {
       this.bloomFilterBaseLocation = newBloomFilterBaseLocation;
       this.io = fileIO;
-      // todo - Currently BF file path is not stored anywhere. Both the reader and writer construct path using the same
-      //  mechanism. Do we need to add bloom filter columns into data file struct, so that we can have a list of all
-      //  the bloom files?
-      this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, newBloomFilterBaseLocation, io);
       return eval(file);
     }
 
+    // For test only
     private boolean eval(DataFile file, String newBloomFilterBaseLocation) {
       this.bloomFilterBaseLocation = newBloomFilterBaseLocation;
-      this.bloomFilters = BloomFilterReader.loadBloomFiltersForFile(file, bloomFilterBaseLocation);
       return eval(file);
     }
 
@@ -290,10 +285,13 @@ public class InclusiveMetricsEvaluator {
         }
       }
 
-      if (bloomFilters != null && bloomFilters.containsKey(id)) {
-        BloomFilter bf = bloomFilters.get(id);
-        long hash = bf.hash(lit.value());
-        if (!bf.findHash(hash)) {
+      // todo - Currently BF file path is not stored anywhere. Both the reader and writer construct path using the same
+      //  mechanism. Do we need to add bloom filter columns into data file struct, so that we can have a list of all
+      //  the bloom files?
+      BloomFilter bloomFilter = BloomFilterReader.loadBloomFilter(bloomFilterBaseLocation, io, ref.fieldId());
+      if (bloomFilter != null) {
+        long hash = bloomFilter.hash(lit.value());
+        if (!bloomFilter.findHash(hash)) {
           return ROWS_CANNOT_MATCH;
         }
       }
@@ -310,12 +308,11 @@ public class InclusiveMetricsEvaluator {
 
     @Override
     public <T> Boolean in(BoundReference<T> ref, Set<T> literalSet) {
-      Integer id = ref.fieldId();
-      for (T lit : literalSet) {
-        if (bloomFilters != null && bloomFilters.containsKey(id)) {
-          BloomFilter bf = bloomFilters.get(id);
-          long hash = bf.hash(lit);
-          if (bf.findHash(hash)) {
+      BloomFilter bloomFilter = BloomFilterReader.loadBloomFilter(bloomFilterBaseLocation, io, ref.fieldId());
+      if (bloomFilter != null) {
+        for (T lit : literalSet) {
+          long hash = bloomFilter.hash(lit);
+          if (bloomFilter.findHash(hash)) {
             return ROWS_MIGHT_MATCH;
           }
         }

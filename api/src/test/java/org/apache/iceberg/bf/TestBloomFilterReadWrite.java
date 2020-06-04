@@ -143,7 +143,7 @@ public class TestBloomFilterReadWrite {
           new File(bfPath).exists());
     }
 
-    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFiltersForFile(FILE, bfBaseLocation);
+    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFilter(FILE, bfBaseLocation);
     Assert.assertTrue("Should read 5 Bloom Filters for the given data file", bfMap.size() == 5);
 
     for (int i = 1; i <= 5; ++i) {
@@ -190,7 +190,7 @@ public class TestBloomFilterReadWrite {
     Assert.assertTrue(String.format("Bloom Filter for field %d should exist", bfFieldId),
         new File(bfPath).exists());
 
-    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFiltersForFile(FILE_WITH_MAP, bfBaseLocation);
+    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFilter(FILE_WITH_MAP, bfBaseLocation);
     Assert.assertTrue("Should read 1 Bloom Filters for the given data file", bfMap.size() == 1);
 
     BloomFilter bf = bfMap.get(bfFieldId);

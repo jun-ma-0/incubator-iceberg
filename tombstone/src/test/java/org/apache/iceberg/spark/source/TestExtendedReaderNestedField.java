@@ -74,6 +74,11 @@ public class TestExtendedReaderNestedField extends WithSpark {
     tables.create(ICEBERG_SCHEMA, SPEC, tableLocation, Collections.singletonMap(
         "write.metadata.metrics.default",
         "truncate(36)"));
+    tables
+        .loadWithTombstoneExtension(getTableLocation())
+        .updateSchema()
+        .addBloomFilter("_acp_system_metadata.acp_sourceBatchId", 0.01, 100)
+        .commit();
   }
 
   @Test
@@ -131,6 +136,60 @@ public class TestExtendedReaderNestedField extends WithSpark {
     Assert.assertEquals("Expect max 30  for all but tombstoned rows", 30, max);
     double avg = load.agg(functions.avg(load.col("_id"))).collectAsList().get(0).getDouble(0);
     Assert.assertEquals("Expect avg 20.0 for all but tombstoned rows", 20.0, avg, 0.0);
+  }
+
+  @Test
+  public void testSparkWithBloomFilter() {
+    Timestamp ts = Timestamp.valueOf("2019-10-10 10:10:10.10");
+
+    List<Row> rows = Lists.newArrayList(
+        RowFactory.create(10, ts, "XYZ", RowFactory.create("D", Collections.emptyMap())),
+        RowFactory.create(101, ts, "XYZ", RowFactory.create("A", Collections.emptyMap())), // tombstoned
+        RowFactory.create(104, ts, "XYZ", RowFactory.create("B", Collections.emptyMap())), // tombstoned
+        RowFactory.create(201, ts, "XYZ", RowFactory.create("C", Collections.emptyMap())), // tombstoned
+        RowFactory.create(20, ts, "XY", RowFactory.create("D", Collections.emptyMap())),
+        RowFactory.create(202, ts, "XY", RowFactory.create("A", Collections.emptyMap())), // tombstoned
+        RowFactory.create(205, ts, "XY", RowFactory.create("B", Collections.emptyMap())), // tombstoned
+        RowFactory.create(301, ts, "XY", RowFactory.create("C", Collections.emptyMap())), // tombstoned
+        RowFactory.create(30, ts, "Y", RowFactory.create("D", Collections.emptyMap())),
+        RowFactory.create(301, ts, "Y", RowFactory.create("A", Collections.emptyMap())), // tombstoned
+        RowFactory.create(301, ts, "Y", RowFactory.create("B", Collections.emptyMap())), // tombstoned
+        RowFactory.create(301, ts, "Y", RowFactory.create("C", Collections.emptyMap())), // tombstoned
+        RowFactory.create(301, ts, "Y", RowFactory.create("Y", Collections.emptyMap()))
+    );
+
+    // Tombstone all rows where `_acp_system_metadata.acp_sourceBatchId` IN (A,B or C)
+    spark.createDataFrame(rows, SCHEMA)
+        .select("*")
+        .write()
+        .format("iceberg.adobe")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN, "_acp_system_metadata.acp_sourceBatchId")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_VALUES_LIST, "A,B,C")
+        .option(TombstoneExtension.TOMBSTONE_COLUMN_EVICT_TS, "1579792561")
+        .mode(SaveMode.Append)
+        .save(getTableLocation());
+
+    Dataset<Row> load = sparkWithTombstonesExtension.read()
+        .format("iceberg")
+        .option("iceberg.bloomFilter.input",
+            "[{\"field\": \"_acp_system_metadata.acp_sourceBatchId\", \"type\": \"string\", \"values\": [\"Y\"]}]")
+        .load(getTableLocation());
+
+    load.createOrReplaceTempView("temp");
+
+    load.show();
+
+    // Use 'batch' partition field for SQL projection and test count
+    long selectByBatchCount = load.select("batch").count();
+    Assert.assertEquals(String.format(
+        "Expect 4 rows in the file that contains `_acp_system_metadata.acp_sourceBatchId` = `Y`",
+        selectByBatchCount), 4L, selectByBatchCount);
+
+    // Use '_id' partition field for SQL projection and test aggregation functions
+    Dataset<Row> selectById = load.select("_id").distinct();
+
+    Assert.assertEquals("Expect all rows with the same _id", 1, selectById.count());
+    Assert.assertEquals("Expect all rows with _id = 301", 301L, selectById.collectAsList().get(0).getList(0));
   }
 
 //  @Test

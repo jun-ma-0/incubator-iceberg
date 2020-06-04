@@ -37,35 +37,28 @@ public class BloomFilterReader {
   private BloomFilterReader() {
   }
 
-  public static Map<Integer, BloomFilter> loadBloomFiltersForFile(
-      DataFile file, String bloomFilterBaseLocation, FileIO io) {
-    Map<Integer, BloomFilter> bloomFilterMap = new HashMap<>();
-    if (file.nullValueCounts() == null) {
-      return bloomFilterMap;
+  public static BloomFilter loadBloomFilter(String bloomFilterBaseLocation, FileIO io, int fieldId) {
+    String bloomFilterPath = String.format("%s-%d", bloomFilterBaseLocation, fieldId);
+    InputFile inputFile = io.newInputFile(bloomFilterPath);
+
+    if (!inputFile.exists()) {
+      return null;
     }
 
-    Set<Integer> columns = file.nullValueCounts().keySet();
-    for (int columnId : columns) {
-      String bloomFilterPath = String.format("%s-%d", bloomFilterBaseLocation, columnId);
-      InputFile inputFile = io.newInputFile(bloomFilterPath);
-      byte[] bfArray = null;
-      if (inputFile.exists()) {
-        try (SeekableInputStream is = inputFile.newStream()) {
-          bfArray = ByteStreams.toByteArray(is);
-        } catch (IOException e) {
-          throw new RuntimeIOException(e);
-        }
-        BloomFilter bf = new BlockSplitBloomFilter(bfArray);
-        bloomFilterMap.put(columnId, bf);
-      }
+    byte[] bfArray = null;
+    try (SeekableInputStream is = inputFile.newStream()) {
+      bfArray = ByteStreams.toByteArray(is);
+    } catch (IOException e) {
+      throw new RuntimeIOException(e);
     }
-    return bloomFilterMap;
+
+    return new BlockSplitBloomFilter(bfArray);
   }
 
   /**
    * For test
    */
-  public static Map<Integer, BloomFilter> loadBloomFiltersForFile(DataFile file, String bloomFilterBaseLocation) {
+  public static Map<Integer, BloomFilter> loadBloomFilter(DataFile file, String bloomFilterBaseLocation) {
     Map<Integer, BloomFilter> bloomFilterMap = new HashMap<>();
     if (file.nullValueCounts() == null) {
       return bloomFilterMap;

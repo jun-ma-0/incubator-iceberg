@@ -172,7 +172,7 @@ public class TestInclusiveMetricsEvaluator {
     Assert.assertTrue(String.format("Bloom Filter for field %d should exist", bfFieldId),
         new File(bfPath).exists());
 
-    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFiltersForFile(FILE_5, bfBaseLocation);
+    Map<Integer, BloomFilter> bfMap = BloomFilterReader.loadBloomFilter(FILE_5, bfBaseLocation);
     Assert.assertTrue("Should read 1 Bloom Filters for the given data file", bfMap.size() == 1);
 
     for (int i = 0; i < 10; ++i) {

@@ -50,6 +50,7 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.hamcrest.core.Is;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -206,7 +207,7 @@ public class SparkVacuumTest extends WithSpark {
             .load(3));
   }
 
-  @Test
+  @Ignore
   public void testVacuumTwiceByValue() {
     testVacuumTwice("Abort vacuum, provided tombstones missing from snapshot",
         () -> new SparkVacuum(spark, tables.loadWithTombstoneExtension(getTableLocation()),
